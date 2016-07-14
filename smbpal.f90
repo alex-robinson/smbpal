@@ -30,6 +30,12 @@
         type(smbpal_state_class) :: now 
     end type
 
+    interface smbpal_update 
+        module procedure smbpal_update_2temp
+        module procedure smbpal_update_monthly
+        module procedure smbpal_update_daily
+    end interface 
+
     private
     public :: smbpal_class
     public :: smbpal_init 
@@ -58,7 +64,38 @@ contains
 
     end subroutine smbpal_init
 
-    subroutine smbpal_update(par,now)
+    subroutine smbpal_update_2temp(par,now)
+        ! Generate climate using two points in year (Tsum,Twin)
+
+        implicit none 
+        
+        type(smbpal_param_class), intent(IN)    :: par
+        type(smbpal_state_class), intent(INOUT) :: now
+
+        call smbpal_update_daily(par,now)
+        
+        return 
+
+    end subroutine smbpal_update_2temp
+
+    subroutine smbpal_update_monthly(par,now)
+        ! Generate climate using monthly input data
+        
+        implicit none 
+        
+        type(smbpal_param_class), intent(IN)    :: par
+        type(smbpal_state_class), intent(INOUT) :: now
+
+        call smbpal_update_daily(par,now)
+
+        return 
+
+    end subroutine smbpal_update_monthly
+
+
+
+    subroutine smbpal_update_daily(par,now)
+        ! Generate climate using daily input data (default)
 
         implicit none 
         
@@ -67,7 +104,7 @@ contains
 
         return 
 
-    end subroutine smbpal_update
+    end subroutine smbpal_update_daily
 
 
     subroutine smbpal_end(smbpal)
