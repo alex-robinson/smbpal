@@ -1,27 +1,29 @@
  module smbpal
 
+    use smbpal_precision
+    
     implicit none 
 
     type smbpal_param_class
         logical :: use_subgrid 
-        real(4) :: par1 
+        real (prec) :: par1 
 
-        real(4) :: rho_sw
-        real(4) :: rho_ice
+        real (prec) :: rho_sw
+        real (prec) :: rho_ice
 
     end type 
 
     type smbpal_state_class 
         integer, allocatable   :: mask(:,:)           ! Ocean-land-ice mask
-        real(4), allocatable   :: mask_ice(:,:)       ! Ice cover fraction (0.0-1.0)
+        real (prec), allocatable   :: mask_ice(:,:)       ! Ice cover fraction (0.0-1.0)
 
-        real(4), allocatable   :: z_srf(:,:)          ! Surface elevation [m]
-        real(4), allocatable   :: t2m(:,:)            ! Surface temperature [K]
-        real(4), allocatable   :: S(:,:)              ! Insolation [W/m2]
+        real (prec), allocatable   :: z_srf(:,:)          ! Surface elevation [m]
+        real (prec), allocatable   :: t2m(:,:)            ! Surface temperature [K]
+        real (prec), allocatable   :: S(:,:)              ! Insolation [W/m2]
         
         ! Prognostic variables
-        real(4), allocatable   :: H(:,:)              ! Snow thickness
-        real(4), allocatable   :: smb(:,:)           ! Surface mass balance (mm/a)
+        real (prec), allocatable   :: H(:,:)              ! Snow thickness
+        real (prec), allocatable   :: smb(:,:)           ! Surface mass balance (mm/a)
 
     end type 
 
@@ -128,7 +130,7 @@ contains
 
         ! Local parameter definitions (identical to object)
         logical :: use_subgrid
-        real(4) :: par1
+        real (prec) :: par1
 
         namelist /smbpal_par/ use_subgrid, par1
                 

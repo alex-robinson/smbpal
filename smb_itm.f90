@@ -4,6 +4,8 @@ module smb_itm
   ! the melt_budget() subroutine, which takes arrays from the main
   ! program as input and outputs arrays of the calculated variables.
   
+  use smbpal_precision 
+  
   implicit none
   
 contains
@@ -304,7 +306,8 @@ contains
     
     implicit none
 
-    real (prec) :: melt, zs, tt, as, ap, S
+    real (prec) :: melt
+    real (prec) :: zs, tt, as, ap, S
     real (prec) :: at
     real (prec) :: dt
 
