@@ -1,193 +1,128 @@
 module smb_itm
-  ! This module contains all subroutines related to the calculation of
-  ! surface mass balance. The external interface to this module is via
-  ! the melt_budget() subroutine, which takes arrays from the main
-  ! program as input and outputs arrays of the calculated variables.
-  
-  use smbpal_precision 
-  
-  implicit none
-  
+    ! This module contains all subroutines related to the calculation of
+    ! surface mass balance. The external interface to this module is via
+    ! the melt_budget() subroutine, which takes arrays from the main
+    ! program as input and outputs arrays of the calculated variables.
+
+    use smbpal_precision 
+
+    implicit none
+
+    real(prec), parameter :: sec_day = 86400.0   ! [sec]
+    real(prec), parameter :: rho_w   = 1.d3      ! Density of pure water [kg/m3]
+    real(prec), parameter :: L_m     = 3.35e5    ! Latent heat of melting [J/kg]
+
+    type(itm_par)
+
+    end type 
+
 contains
 
-  ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-  ! Subroutine : m e l t _ b u d g e t
-  ! Author     : Alex Robinson
-  ! Purpose    : Determine the total melt, accumulation and 
-  !              surface mass balance at a given point
-  !              * input in mm water equivalent
-  ! * As in Ettema et al (2009) supplementary information,
-  !   surface mass balance is defined as:
-  !     SMB  = snow + rain - runoff   [kg m2 / d ] == [mm / d]
-  !   runoff = rain + melt - refrozen
-  ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-  subroutine melt_budget( m2, zs, S, tt, tte, pdds, pp, snow, mmfac, as, ap, &
-                          h_snow, rf, runoff, runoff_snow,  &
-                          runoff_rain, melt, melted_ice, new_ice, refrozen, dh, &
-                          melt_insol, melt_S0, S0, annual )
+  elemental subroutine snowpack_budget(par,H_snow,alb_s,smbi,smb,melt,runoff,refrz, &
+                                        z_srf,H_ice,S,t2m,PDDs, pr, sf )
+    ! Determine the total melt, accumulation and surface mass balance at a given point
+    !  * Modified from rembo subroutine `melt_budget`
+    !  * input in mm water equivalent
+    ! Note: Definitions as in Ettema et al (2009) supplementary information,
+    !     SMB  = snow + rain - runoff     [kg m2 / d ] == [mm / d]
+    !   runoff = rain + melt - refrozen   [kg m2 / d ] == [mm / d]
 
     implicit none
     
-    integer, parameter :: ny = nys, nx = nxs
-
-    double precision, dimension(ny,nx) :: m2, zs, tt, tte, pdds, mmfac
-    double precision, dimension(ny,nx) :: rf, as, ap, S
+    type(itm_par), intent(IN)    :: par 
+    real(prec),    intent(INOUT) :: H_snow, alb_s 
+    real(prec),    intent(INOUT) :: smbi, smb, melt, runoff, refrz 
+    real(prec),    intent(IN)    :: z_srf, H_ice, S, t2m, PDDs 
+    real(prec),    intent(IN)    :: pr, sf
+    real(prec) :: refreezing_max, refrozen_snow_max
+    real(prec) :: smb, smbi
+    real(prec) :: melt_pot
     
-    double precision, dimension(ny,nx) :: pp, snow, rain, h_snow, h_snow0
-    double precision, dimension(ny,nx) :: refreezing_max, refrozen_snow_max
-    double precision, dimension(ny,nx) :: smb, smbi, dh
-    double precision, dimension(ny,nx) :: mm_snow
-    
-    double precision, dimension(ny,nx) ::              refrozen_rain, runoff_rain
-    double precision, dimension(ny,nx) :: melted_snow, refrozen_snow, runoff_snow
-    double precision, dimension(ny,nx) :: melted_firn, refrozen_firn, runoff_firn
-    double precision, dimension(ny,nx) :: melted_ice, snow_to_ice, new_ice
-    double precision, dimension(ny,nx) :: melt, refrozen, runoff 
-    double precision, dimension(ny,nx) :: melt_insol, melt_S0, S0
-    double precision, dimension(ny,nx) :: S_melt, S_diagnose
+    ! Local variables
+    real(prec) :: rf, atrans 
+    real(prec) :: rfac  
+    real(prec) ::              refrozen_rain, runoff_rain
+    real(prec) :: melted_snow, refrozen_snow, runoff_snow
+    real(prec) :: melted_firn, refrozen_firn, runoff_firn
+    real(prec) :: melted_ice, snow_to_ice, new_ice
+    real(prec) :: melt, refrozen, runoff 
 
-    double precision, dimension(ny,nx) :: mm_snow_2, melted_snow_2, melted_ice_2
-
-    logical :: is_annual
-    logical, optional :: annual
-    
-    is_annual = .FALSE.
-    if ( present(annual)) is_annual = annual
-    
-    ! Decide which insolation values to use for actual melt calculations
-    S_melt = S
-    S_diagnose = S0
-    if (itm_S0 .eq. 2 .or. itm_S0 .eq. 3) then
-      S_melt = S0
-      S_diagnose = S 
-    end if
-
-    ! Determine initial values   
-    rain = pp - snow
+    ! Determine rainfall from precip and snowfall 
+    rf = pr - sf
 
     ! Determine preliminary surface and planetary albedo
-    call get_albedo(as, ap, m2, h_snow, pdds)
-    
-    ! Add additional snowfall
-    h_snow0 = h_snow 
-    h_snow = h_snow + snow
-    
-    ! Make sure all snow disappears over the ocean
-    ! (important for paleo runs with varying sea-level)
-    !where ( m2 .eq. 2.d0 ) h_snow = 0.d0
-    
-    if (melt_choice .eq. 1) then
-    
-      ! Get amount of melt from oerlemans scheme
-      call itm(mm_snow,zs,tt,as,ap,S_melt)
+    alb_s = calc_albedo_surface(par,z_srf,H_ice,H_snow,pdds)
 
-      ! Add additional melt from correction term
-      if (itm_S0 .eq. 3) then 
-        mm_snow = mm_snow + melt_insol
-        where(mm_snow .lt. 0.d0) mm_snow = 0.d0
-      end if
-
-    else
-
-      ! Melt of snow and ice is based on pdd factors for snow and ice
-      !mm_snow = tte * mm_teff_snow
-      
-      ! Melt of snow and ice is based on pdd factors for snow and ice
-      ! and additional melt due to insolation anomaly
-      mm_snow = tte * mm_teff_snow + melt_insol
-      where(mm_snow .lt. 0.d0) mm_snow = 0.d0
-
-
-    end if
+    ! Add additional snowfall 
+    H_snow  = H_snow + sf
     
+    ! Get amount of potential melt from ITM scheme
+    atrans   = calc_atmos_transmissivity(z_srf,par%trans_a,par%trans_b)
+    melt_pot = calc_itm(S,t2m,alb_s,atrans,par%itm_c,par%itm_t)
+
     ! Determine how much snow and ice would be melted today
-    where (mm_snow .gt. h_snow)
+    if (melt_pot .gt. H_snow)
       
       ! All snow is melted, the rest of energy converted to melt some ice
       ! The rest of energy will go into melting ice
-      melted_snow = h_snow
-      melted_ice  = (mm_snow - h_snow) * mmfac
+      melted_snow = H_snow
+      melted_ice  = melt_pot - H_snow
 
-    elsewhere
+    else
       
       ! Snow melt will use all energy, none left for ice melt
-      melted_snow = mm_snow
+      melted_snow = melt_pot
       melted_ice  = 0.d0
       
-    end where    
+    end if    
     
-    ! Now calculate the melt (total ablation)
+    ! Now calculate the actual melt (total ablation)
     melt   = melted_snow + melted_ice
     
-    ! If desired, diagnose melt if insolation were equal to present day (or vice versa)
-    if (melt_choice .eq. 1 .and. itm_S0 .gt. 0) then
-
-      call itm(mm_snow_2,zs,tt,as,ap,S_diagnose)
-
-      where (mm_snow .gt. h_snow)
-        ! All snow is melted, the rest of energy converted to melt some ice
-        ! The rest of energy will go into melting ice
-        melted_snow_2 = h_snow
-        melted_ice_2  = (mm_snow_2 - h_snow) * mmfac
-      elsewhere
-        ! Snow melt will use all energy, none left for ice melt
-        melted_snow_2 = mm_snow_2
-        melted_ice_2  = 0.d0
-      end where    
-      
-      ! Total melt for S0
-      melt_S0 = melted_snow_2 + melted_ice_2 
-
-    end if 
-
     ! Remove melted snow, if any, from the snow height budget
-    h_snow = h_snow - melted_snow
+    H_snow = H_snow - melted_snow
     
     ! Adjust the albedo (accounting for actual amount of melt)
-    call get_albedo(as, ap, m2, h_snow, pdds, melt)
-    
+    alb_s = calc_albedo_surface(par,z_srf,H_ice,H_snow,pdds,melt=melt)
+
     ! Determine how much new ice is made from compression of remaining snow
     snow_to_ice = 0.d0
-    where (h_snow .gt. h_snow_max)
+    if (H_snow .gt. par%H_snow_max)
       ! Assume excess contributes to new ice
-      snow_to_ice = (h_snow - h_snow_max)
+      snow_to_ice = (H_snow - par%H_snow_max)
       
       ! Reset snow height down to maximum height
-      h_snow = h_snow_max
-    end where
-    
-    ! If using annual PDD approach...
-    if ( is_annual ) then
-      snow_to_ice = snow - melted_snow
-      h_snow = snow
+      H_snow = par%H_snow_max
     end if
     
     ! Determine what fraction of the melted snow and rain will refreeze, 
     ! (Note: rf is zero if not on ice sheet or there is no snow cover)
-    rf = 0.d0
-    where ( m2 .eq. 0.d0 .and. h_snow .gt. 0.d0 )
+    if ( H_ice .gt. 0.d0 .and. H_snow .gt. 0.d0 )
     
-      rf = Pmaxfrac * snow / max(1d-5, (snow + rain))    ! max() here ensures no division by zero, if (snow+rain)==0, then rf is zero anyway
-      
-      ! Modify refreezing factor based on height of snow
-      where ( h_snow .gt. 2e3 )
-        rf = 1.d0                                         ! refreezing factor is 1 for large snow heights.      
-      else where ( h_snow .gt. 1e3 )
-        rf = rf + ((h_snow-1e3)/(2e3-1e3) ) * (1.d0 - rf) ! linear function increasing to rf=1 as h_snow increases to 2m.
-      end where
-      
-    end where
+        rfac = par%Pmaxfrac * sf / max(1d-5,pr)    ! max() here ensures no division by zero, if (snow+rain)==0, then rfac is zero anyway
+
+        ! Modify refreezing factor based on height of snow
+        if ( H_snow .gt. 2e3 )
+            rfac = 1.d0                                         ! refreezing factor is 1 for large snow heights.      
+        else if ( H_snow .gt. 1e3 )
+            rfac = rfac + ((H_snow-1e3)/(2e3-1e3) ) * (1.d0 - rfac) ! linear function increasing to rf=1 as H_snow increases to 2m.
+        end if
+    
+    else 
+        rfac = 0.0 
+
+    end if
    
     ! Determine the actual maximum amount of refreezing
-    refreezing_max    = h_snow                                ! Total refreezing depends on amount of snow left!
-    refrozen_rain     = min(rain*rf,refreezing_max)           ! First rain takes up refreezing capacity
+    refreezing_max    = H_snow                                ! Total refreezing depends on amount of snow left!
+    refrozen_rain     = min(rf*rfac,refreezing_max)           ! First rain takes up refreezing capacity
     refrozen_snow_max = refreezing_max - refrozen_rain        ! Subtract rain from refreezing capacity to determine what's left for snow
-    refrozen_snow     = min(melted_snow*rf,refrozen_snow_max) ! melted_snow uses remaining capacity if it needs it
+    refrozen_snow     = min(melted_snow*rfac,refrozen_snow_max) ! melted_snow uses remaining capacity if it needs it
     refrozen          = refrozen_snow + refrozen_rain         ! Amount of ice created from refreezing
 
     ! Determine how much water will runoff for each component
     runoff_snow = melted_snow - refrozen_snow                 ! Net snow melt
-    runoff_rain = rain - refrozen_rain                        ! Net rain
+    runoff_rain = rf - refrozen_rain                          ! Net rainfall
     runoff      = runoff_snow + runoff_rain + melted_ice      ! Total runoff
     
     ! Get the total ice accumulated for the day
@@ -207,123 +142,134 @@ contains
     ! Note: no refreezing off of ice sheet, so there total melt can
     ! only equal the amount of snow melted
     ! Note: this value can be negative too (negative contribution to energy flux)
-    where ( m2 .eq. 0 ) 
+    if ( mask .eq. 0 ) 
       dh = melt-refrozen       ! Technically refrozen=0 here, but include it anyway
-    elsewhere
+    else
       dh = melted_snow-refrozen
-    end where
-    
-    ! Output variables for mass balance
-    !smb, smbi, snow, rain, runoff, runoff_rain, new_ice (accum), melt, melted_ice, refrozen
+    end if
     
     return
   
-  end subroutine melt_budget
+  end subroutine snowpack_budget
     
-  ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-  ! Subroutine : g e t _ a l b e d o
-  ! Author     : Alex Robinson
-  ! Purpose    : Determine the current surface and planetary albedos
-  ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-  subroutine get_albedo(as, ap, mask, hsnow, PDDs, melt_in)
+    ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    ! Subroutine : g e t _ a l b e d o
+    ! Author     : Alex Robinson
+    ! Purpose    : Determine the current surface and planetary albedos
+    ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    elemental function calc_albedo_surface(par,z_srf,H_ice,H_snow,PDDs,melt) result(alb)
     
-    implicit none
-    
-    integer, parameter :: ny = nys, nx = nxs
-    
-    real (prec), dimension(:,:) :: as, ap, mask, hsnow, PDDs
-    real (prec), dimension(:,:), optional :: melt_in
-    real (prec), dimension(ny,nx) :: as_snow, as_ground, depth, as_snow_planet
-    real (prec), dimension(ny,nx) :: hsnow_critical, melt
-    integer :: n, k
-    
-    ! Determine the critical snow height based on number of PDDs,
-    ! which correspond to vegetation growth
-    ! 0-100 PDDs    = desert, 10mm
-    ! 100-1000 PDDs = tundra (grass), linearly increasing between 10mm => 100mm
-    ! 1000 PDDs +   = forest, 100mm
-    where ( PDDs .le. 1d2 ) 
-      hsnow_critical = hsnow_crit0 ! 10 mm
-    else where ( PDDs .ge. 1d3 )
-      hsnow_critical = hsnow_crit1 ! 100 mm
-    elsewhere
-      hsnow_critical = hsnow_crit0 + (hsnow_crit1-hsnow_crit0) * (( PDDs - 1d2 ) / ( 1d3 - 1d2))
-    end where
-    
-    ! Determine the scaled snowdepth
-    depth = hsnow / hsnow_critical
-    
-    ! Determine the amount of melt to affect abledo calculation.
-    ! Default is high melt everywhere, so that jump in albedo is avoided
-    ! at onset of melt season.
-    ! After calculating actual melt, this is included as an argument and
-    ! albedo is recalculated.
-    melt = melt_crit+1.d0
-    if ( present(melt_in) ) melt = melt_in
-    
-    ! Figure out what the surface albedo would be with no snow, 
-    ! based on the type of ground underneath ( ice or land )
-    as_ground = as_ice
-    where (mask .eq. 2.d0) as_ground = as_ocean
-    where (mask .eq. 1.d0) as_ground = as_land*(1d3-min(PDDs,1d3))/(1d3-0d0) &
-                               + as_land_forest*min(PDDs,1d3)/(1d3-0d0)
+        implicit none
+        
+        type(itm_par), intent(IN) :: par 
+        real(prec),   intent(IN) :: z_srf, H_ice, H_snow, PDDs 
+        real(prec),   intent(IN), optional :: melt
+        real(prec) :: alb 
 
-    ! Determine current snow albedo: if melt gt eg, 1mm/day, then change albedo to melting snow!
-    as_snow = as_snow0
-    where (melt .gt. melt_crit) as_snow = as_snow1   
+        ! Local variables
+        real(prec) :: H_snow_crit, depth, as_snow, alb_bg, melt_now
+        integer :: n, k
+        
+        ! Determine the critical snow height based on number of PDDs,
+        ! which correspond to vegetation growth
+        ! 0-100 PDDs    = desert, 10mm
+        ! 100-1000 PDDs = tundra (grass), linearly increasing between 10mm => 100mm
+        ! 1000 PDDs +   = forest, 100mm
+        if ( PDDs .le. 100.0 ) 
+            H_snow_crit = par%H_snow_crit_desert ! 10 mm
+        else if (PDDs .le. 1000.0) 
+            H_snow_crit = par%H_snow_crit_desert +   &
+                (par%H_snow_crit_forest-par%H_snow_crit_desert) * (PDDs-100.0)/(1000.0-100.0)
+        else
+            H_snow_crit = par%H_snow_crit_forest ! 100 mm
+        end if
+        
+        ! Determine the scaled snowdepth
+        depth = min( H_snow / H_snow_crit, 1.0 ) 
+        
+        ! Determine the amount of melt to affect abledo calculation.
+        ! Default is high melt everywhere, so that jump in albedo is avoided
+        ! at onset of melt season. After calculating actual melt, this is included 
+        ! as an argument and albedo is recalculated.
+        melt_now = par%melt_crit+1.0
+        if ( present(melt) ) melt_now = melt
     
-    ! Determine snow albedo for use with REMBO (to get planetary albedo)
-    ! Where PDDs > 1d3, forest snow
-    as_snow_planet = as_snow
-    where ( hsnow_critical .ge. hsnow_crit1 ) as_snow_planet = as_snow_forest  
+        ! Figure out what the surface albedo would be with no snow, 
+        ! based on the type of ground underneath ( ice or land )
+        if (z_srf .le. 0.0) then 
+            alb_bg = par%alb_ocean
 
-    ! First, calculate surface albedo to use for REMBO, 
-    ! which is not necessarily identical to snow albedo
-    ! minimum albedo is that of bare ground
-    as = min(as_ground + depth*(as_snow_planet-as_ground), as_snow_planet)
-    
-    ! Get the current planetary albedo
-    ap = ap0_intercept + ap0_slope * as
-    
-    ! Get current surface albedo to be used for ITM melt scheme
-    ! It will either be the maximum albedo (that of dry snow: as_snow)
-    ! or the wet snow albedo plus a fraction depending on height of snow
-    ! minimum albedo now should be that of wet snow minimum
-    as = min(as_snow2 + depth*(as_snow-as_snow2), as_snow)
-    
-    return
-    
-  end subroutine get_albedo
-  
-  ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-  ! Subroutine : i t m (insolation temperature melt)
-  ! Author     : Alex Robinson
-  ! Purpose    : Determine the total melt, accumulation and 
-  !              surface mass balance at a given point
-  !              * output in mm water equivalent
-  ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-  elemental function itm(zs,tt,as,ap,S) result(melt)
-    
-    implicit none
+        else if (z_srf .gt. 0.0 .and. H_ice .eq. 0.0) then 
+             alb_bg = par%alb_land*(1d3-min(PDDs,1d3))/(1d3-0d0) &
+                                        + par%alb_forest*(min(PDDs,1d3))/(1d3-0d0)
+        else 
+            alb_bg = par%alb_ice 
 
-    real (prec) :: melt
-    real (prec) :: zs, tt, as, ap, S
-    real (prec) :: at
-    real (prec) :: dt
+        end if
 
-    ! Find out how many seconds in given time period (always daily!)
-    dt = sec_year / nk
+        ! Determine current snow albedo: if melt gt eg, 1mm/day, then change albedo to melting snow!
+        as_snow = par%alb_snow_dry
+        if (melt_now .gt. par%melt_crit) as_snow = par%alb_snow_wet  
+        
+        ! Get current surface albedo to be used for ITM melt scheme
+        ! It will either be the maximum albedo (that of dry snow: as_snow)
+        ! or the wet snow albedo plus a fraction depending on height of snow
+        ! minimum albedo now should be that of ice / wet snow minimum
+        alb = alb_bg + depth*(as_snow-alb_bg)
     
-    at = at_intercept + at_slope* max(zs,0.d0)
+        return
     
-    ! Calculate potential melt
-    melt = dt*(at*(1.d0 - as)*S + itm_cc + itm_t*tt) / (rho_w*Lm)
+    end function calc_albedo_surface
     
-    melt = max( melt, 0.d0 ) * 1d3     ! [m/day] => [mm/day], only positive melt
+    elemental function calc_albedo_planet(alb_s,a,b) result(alb_p)
 
-    return
+        implicit none 
+
+        real(prec), intent(IN) :: alb_s, a, b 
+        real(prec) :: alb_p 
+
+        alb_p = a + b*alb_s
     
-  end function itm
+        return 
+
+    end function calc_albedo_planet
+
+    elemental function calc_atmos_transmissivity(z_srf,a,b) result(at)
+
+        implicit none 
+
+        real(prec), intent(IN) :: z_srf, a, b 
+        real(prec) :: at 
+
+        at = a + b*max(z_srf,0.d0)
+    
+        return 
+
+    end function calc_atmos_transmissivity
+
+    ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    ! Subroutine : i t m (insolation temperature melt)
+    ! Author     : Alex Robinson
+    ! Purpose    : Determine the total melt, accumulation and 
+    !              surface mass balance at a given point
+    !              * output in mm water equivalent per day 
+    ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    elemental function calc_itm(S,t2m,alb_s,atrans,c,t) result(melt)
+        ! Determine the potential melt rate
+        implicit none
+
+        real(prec), intent(IN) :: S, t2m, alb_s, atrans, c, t
+        real(prec) :: melt
+
+        ! Calculate potential melt [m/s]
+        melt = (atrans*(1.d0 - alb_s)*S + c + t*t2m) / (rho_w*L_m)
+
+        ! Convert: [m/s] => [mm/day], only positive melt
+        melt = max( melt, 0.d0 ) * sec_day * 1d3  
+
+        return
+
+    end function calc_itm
 
 end module smb_itm 
 

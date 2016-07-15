@@ -114,7 +114,10 @@ $(objdir)/interp1D.o: $(libdir)/insol/interp1D.f90
 $(objdir)/insolation.o: $(libdir)/insol/insolation.f90
 	$(FC) $(DFLAGS) $(FLAGS) -c -o $@ $<
 
-$(objdir)/smbpal.o: $(srcdir)/smbpal.f90 $(objdir)/nml.o
+$(objdir)/smbpal_precision.o: $(srcdir)/smbpal_precision.f90
+	$(FC) $(DFLAGS) $(FLAGS) -c -o $@ $<
+
+$(objdir)/smbpal.o: $(srcdir)/smbpal.f90 $(objdir)/nml.o $(objdir)/smbpal_precision.o
 	$(FC) $(DFLAGS) $(FLAGS) -c -o $@ $<
 
 # Group the object files together
@@ -122,7 +125,8 @@ obj_smbpal =     $(objdir)/insolation.o \
 				 $(objdir)/interp1D.o \
 				 $(objdir)/nml.o \
 				 $(objdir)/ncio.o \
-				 $(objdir)/smbpal.o
+				 $(objdir)/smbpal.o \
+				 $(objdir)/smbpal_precision.o
 
 ## Complete programs
 

@@ -3,3 +3,28 @@
     par1        = 1.0 
 
 /
+
+&itm_par
+        
+    H_snow_max      =  5.0e3         ! Maximum allowed snowpack thickness [mm w.e.]
+    Pmaxfrac        =  0.6           ! Refreezing factor 
+
+    ## ITM 
+    trans_a         =  XX 
+    trans_b         =  XX 
+    itm_c           = -55.0
+    itm_t           =  10.0
+
+    ## Surface albedo
+    alb_snow_dry    =  0.8
+    alb_snow_wet    =  0.6
+    alb_ice         =  0.4
+    alb_snow_forest =  0.4
+    alb_land        =  0.2
+    alb_land_forest =  0.1
+    alb_ocean       =  0.1
+    H_snow_crit_desert  =  10.0
+    H_snow_crit1_forest = 100.0
+    melt_crit           =   1.0      ! Critical melt rate to reduce snow albedo [mm/day]
+
+/

@@ -1,7 +1,7 @@
  module smbpal
 
     use smbpal_precision
-    
+
     implicit none 
 
     type smbpal_param_class
@@ -14,7 +14,7 @@
     end type 
 
     type smbpal_state_class 
-        integer, allocatable   :: mask(:,:)           ! Ocean-land-ice mask
+        integer,     allocatable   :: mask(:,:)           ! Ocean-land-ice mask
         real (prec), allocatable   :: mask_ice(:,:)       ! Ice cover fraction (0.0-1.0)
 
         real (prec), allocatable   :: z_srf(:,:)          ! Surface elevation [m]
@@ -66,13 +66,16 @@ contains
 
     end subroutine smbpal_init
 
-    subroutine smbpal_update_2temp(par,now)
-        ! Generate climate using two points in year (Tsum,Twin)
+    subroutine smbpal_update_2temp(par,now,t2m_ann,t2m_sum,pr_ann,time_bp)
+        ! Generate climate using two points in year (Tsum,Tann)
 
         implicit none 
         
         type(smbpal_param_class), intent(IN)    :: par
         type(smbpal_state_class), intent(INOUT) :: now
+        real (prec), intent(IN) :: t2m_ann(:,:), t2m_sum(:,:)
+        real (prec), intent(IN) ::  pr_ann(:,:)
+        real (prec), intent(IN) :: time_bp       ! years BP 
 
         call smbpal_update_daily(par,now)
         
@@ -80,13 +83,15 @@ contains
 
     end subroutine smbpal_update_2temp
 
-    subroutine smbpal_update_monthly(par,now)
+    subroutine smbpal_update_monthly(par,now,t2m,pr,time_bp)
         ! Generate climate using monthly input data
         
         implicit none 
         
         type(smbpal_param_class), intent(IN)    :: par
         type(smbpal_state_class), intent(INOUT) :: now
+        real (prec), intent(IN) :: t2m(:,:,:), pr(:,:,:)
+        real (prec), intent(IN) :: time_bp       ! years BP 
 
         call smbpal_update_daily(par,now)
 
@@ -97,7 +102,7 @@ contains
 
 
     subroutine smbpal_update_daily(par,now)
-        ! Generate climate using daily input data (default)
+        ! Generate climate using daily (360-day year) input data (default)
 
         implicit none 
         
