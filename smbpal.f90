@@ -1,37 +1,37 @@
  module smbpal
 
     use smbpal_precision
+    use insolation
     use smb_itm 
-    
+
     implicit none 
 
     type smbpal_param_class
+        type(itm_par) :: itm
         logical :: use_subgrid 
-        real (prec) :: par1 
+        real(prec) :: par1 
 
-        real (prec) :: rho_sw
-        real (prec) :: rho_ice
+        real(prec) :: rho_sw
+        real(prec) :: rho_ice
 
     end type 
 
     type smbpal_state_class 
-        integer,     allocatable   :: mask(:,:)           ! Ocean-land-ice mask
-        real (prec), allocatable   :: mask_ice(:,:)       ! Ice cover fraction (0.0-1.0)
-
-        real (prec), allocatable   :: z_srf(:,:)          ! Surface elevation [m]
-        real (prec), allocatable   :: t2m(:,:)            ! Surface temperature [K]
-        real (prec), allocatable   :: S(:,:)              ! Insolation [W/m2]
+        real(prec), allocatable   :: t2m(:,:)            ! Surface temperature [K]
+        real(prec), allocatable   :: pr(:,:), sf(:,:)    ! Precip, snowfall [mm/a or mm/d]
+        real(prec), allocatable   :: S(:,:)              ! Insolation [W/m2]
+        real(prec), allocatable   :: teff(:,:)           ! Effective temp. (ie, PDDs) [num. of days]
         
         ! Prognostic variables
-        real (prec), allocatable   :: H(:,:)              ! Snow thickness
-        real (prec), allocatable   :: smb(:,:)           ! Surface mass balance (mm/a)
-
+        real(prec), allocatable   :: H_snow(:,:)         ! Snow thickness [mm]
+        real(prec), allocatable   :: alb_s(:,:)          ! Surface albedo 
+        real(prec), allocatable   :: smbi(:,:), smb(:,:) ! Surface mass balance [mm/a or mm/d]
+        real(prec), allocatable   :: melt(:,:), runoff(:,:), refrz(:,:)   ! smb components
     end type 
 
     type smbpal_class
         type(smbpal_param_class) :: par 
-        type(itm_par)            :: par_itm
-        type(smbpal_state_class) :: now 
+        type(smbpal_state_class) :: now, mon, ann
     end type
 
     interface smbpal_update 
@@ -68,34 +68,58 @@ contains
 
     end subroutine smbpal_init
 
-    subroutine smbpal_update_2temp(par,now,t2m_ann,t2m_sum,pr_ann,time_bp)
+    subroutine smbpal_update_2temp(par,now,t2m_ann,t2m_sum,pr_ann, &
+                                   lats,z_srf,H_ice,time_bp)
         ! Generate climate using two points in year (Tsum,Tann)
 
         implicit none 
         
         type(smbpal_param_class), intent(IN)    :: par
         type(smbpal_state_class), intent(INOUT) :: now
-        real (prec), intent(IN) :: t2m_ann(:,:), t2m_sum(:,:)
-        real (prec), intent(IN) ::  pr_ann(:,:)
-        real (prec), intent(IN) :: time_bp       ! years BP 
+        real(prec), intent(IN) :: t2m_ann(:,:), t2m_sum(:,:)
+        real(prec), intent(IN) ::  pr_ann(:,:), lats(:,:), z_srf(:,:), H_ice(:,:)
+        real(prec), intent(IN) :: time_bp       ! years BP 
 
-        call smbpal_update_daily(par,now)
-        
+        ! Local variables
+        integer, parameter :: ndays = 360   ! 360-day year 
+        integer :: day 
+
+        do day = 1, ndays 
+
+            ! Determine t2m, pr, S and PDDs of today 
+!             now%t2m = cos(2*pi*day/real(ndays))
+            
+            now%pr = pr_ann / real(ndays)   ! Evenly divided precip over the year (account for temp?)
+
+            now%S = calc_insol_day(day,dble(lats),dble(time_bp),fldr="libs/insol/input")
+
+            ! Call mass budget for today
+            call snowpack_budget(par%itm,z_srf,H_ice,now%S,now%t2m,now%teff,now%pr,now%sf, &
+                                 now%H_snow,now%alb_s,now%smbi,now%smb, &
+                                 now%melt,now%runoff,now%refrz)
+        end do 
+
+
         return 
 
     end subroutine smbpal_update_2temp
 
     subroutine smbpal_update_monthly(par,now,t2m,pr,time_bp)
-        ! Generate climate using monthly input data
+        ! Generate climate using monthly input data [nx,ny,nmon]
         
         implicit none 
         
         type(smbpal_param_class), intent(IN)    :: par
         type(smbpal_state_class), intent(INOUT) :: now
-        real (prec), intent(IN) :: t2m(:,:,:), pr(:,:,:)
-        real (prec), intent(IN) :: time_bp       ! years BP 
+        real(prec), intent(IN) :: t2m(:,:,:), pr(:,:,:)
+        real(prec), intent(IN) :: time_bp       ! years BP 
 
-        call smbpal_update_daily(par,now)
+        ! Local variables
+        real(prec), allocatable :: t2m_now(:,:), pr_now(:,:)
+
+        allocate(t2m_now(size(t2m,1),size(t2m,2)))
+        allocate(pr_now(size(pr,1),size(pr,2)))
+
 
         return 
 
@@ -103,14 +127,18 @@ contains
 
 
 
-    subroutine smbpal_update_daily(par,now)
-        ! Generate climate using daily (360-day year) input data (default)
+    subroutine smbpal_update_daily(par,now,t2m,pr,time_bp)
+        ! Generate climate using input data for each day
 
         implicit none 
         
         type(smbpal_param_class), intent(IN)    :: par
         type(smbpal_state_class), intent(INOUT) :: now
+        real(prec), intent(IN) :: t2m(:,:), pr(:,:)
+        real(prec), intent(IN) :: time_bp       ! years BP  
 
+        ! ** TO DO ** 
+        
         return 
 
     end subroutine smbpal_update_daily
@@ -137,7 +165,7 @@ contains
 
         ! Local parameter definitions (identical to object)
         logical :: use_subgrid
-        real (prec) :: par1
+        real(prec) :: par1
 
         namelist /smbpal_par/ use_subgrid, par1
                 
@@ -184,13 +212,18 @@ contains
         call smbpal_deallocate(now)
 
         ! Allocate variables
-        allocate(now%mask(nx,ny))
-        allocate(now%mask_ice(nx,ny))
-        allocate(now%z_srf(nx,ny))
         allocate(now%t2m(nx,ny))
+        allocate(now%pr(nx,ny))
+        allocate(now%sf(nx,ny))
         allocate(now%S(nx,ny))
-        allocate(now%H(nx,ny))
+        allocate(now%teff(nx,ny))
+        allocate(now%H_snow(nx,ny))
+        allocate(now%alb_s(nx,ny))
+        allocate(now%smbi(nx,ny))
         allocate(now%smb(nx,ny))
+        allocate(now%melt(nx,ny))
+        allocate(now%runoff(nx,ny))
+        allocate(now%refrz(nx,ny))
 
         return
 
@@ -203,13 +236,19 @@ contains
         type(smbpal_state_class) :: now 
 
         ! Allocate state objects
-        if (allocated(now%mask))     deallocate(now%mask)
-        if (allocated(now%mask_ice)) deallocate(now%mask_ice)
-        if (allocated(now%z_srf))    deallocate(now%z_srf)
+        if (allocated(now%t2m))      deallocate(now%t2m)
+        if (allocated(now%pr))       deallocate(now%pr)
+        if (allocated(now%sf))       deallocate(now%sf)
         if (allocated(now%S))        deallocate(now%S)
-        if (allocated(now%H))        deallocate(now%H)
+        if (allocated(now%teff))     deallocate(now%teff)
+        if (allocated(now%H_snow))   deallocate(now%H_snow)
+        if (allocated(now%alb_s))    deallocate(now%alb_s)
+        if (allocated(now%smbi))     deallocate(now%smbi)
         if (allocated(now%smb))      deallocate(now%smb)
-
+        if (allocated(now%melt))     deallocate(now%melt)
+        if (allocated(now%runoff))   deallocate(now%runoff)
+        if (allocated(now%refrz))    deallocate(now%refrz)
+        
         return
 
     end subroutine smbpal_deallocate

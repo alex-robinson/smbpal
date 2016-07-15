@@ -10,8 +10,8 @@
     Pmaxfrac        =  0.6           ! Refreezing factor 
 
     ## ITM 
-    trans_a         =  XX 
-    trans_b         =  XX 
+    trans_a         =  0.46 
+    trans_b         =  6e-5
     itm_c           = -55.0
     itm_t           =  10.0
 
