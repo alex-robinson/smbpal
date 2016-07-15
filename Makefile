@@ -117,6 +117,9 @@ $(objdir)/insolation.o: $(libdir)/insol/insolation.f90
 $(objdir)/smbpal_precision.o: $(srcdir)/smbpal_precision.f90
 	$(FC) $(DFLAGS) $(FLAGS) -c -o $@ $<
 
+$(objdir)/smb_itm.o: $(srcdir)/smb_itm.f90 $(objdir)/smbpal_precision.o
+	$(FC) $(DFLAGS) $(FLAGS) -c -o $@ $<
+
 $(objdir)/smbpal.o: $(srcdir)/smbpal.f90 $(objdir)/nml.o $(objdir)/smbpal_precision.o
 	$(FC) $(DFLAGS) $(FLAGS) -c -o $@ $<
 
@@ -125,6 +128,7 @@ obj_smbpal =     $(objdir)/insolation.o \
 				 $(objdir)/interp1D.o \
 				 $(objdir)/nml.o \
 				 $(objdir)/ncio.o \
+				 $(objdir)/smb_itm.o \
 				 $(objdir)/smbpal.o \
 				 $(objdir)/smbpal_precision.o
 

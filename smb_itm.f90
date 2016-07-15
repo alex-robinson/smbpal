@@ -12,46 +12,48 @@ module smb_itm
     real(prec), parameter :: rho_w   = 1.d3      ! Density of pure water [kg/m3]
     real(prec), parameter :: L_m     = 3.35e5    ! Latent heat of melting [J/kg]
 
-    type(itm_par)
+    type itm_par
+        real(prec) :: trans_a, trans_b 
+        real(prec) :: itm_c, itm_t 
+        real(prec) :: H_snow_max
+        real(prec) :: Pmaxfrac
+        real(prec) :: H_snow_crit_desert
+        real(prec) :: H_snow_crit_forest
+        real(prec) :: melt_crit 
+        real(prec) :: alb_ocean, alb_land, alb_forest, alb_ice 
+        real(prec) :: alb_snow_dry, alb_snow_wet 
 
     end type 
 
 contains
 
-  elemental subroutine snowpack_budget(par,H_snow,alb_s,smbi,smb,melt,runoff,refrz, &
-                                        z_srf,H_ice,S,t2m,PDDs, pr, sf )
+  elemental subroutine snowpack_budget(par,z_srf,H_ice,S,t2m,PDDs,pr,sf, &
+                                       H_snow,alb_s,smbi,smb,melt,runoff,refrz)
     ! Determine the total melt, accumulation and surface mass balance at a given point
     !  * Modified from rembo subroutine `melt_budget`
     !  * input in mm water equivalent
     ! Note: Definitions as in Ettema et al (2009) supplementary information,
-    !     SMB  = snow + rain - runoff     [kg m2 / d ] == [mm / d]
-    !   runoff = rain + melt - refrozen   [kg m2 / d ] == [mm / d]
+    !     SMB  = sf   + rf   - runoff     [kg m2 / d ] == [mm / d]
+    !   runoff = rain + melt - refrz      [kg m2 / d ] == [mm / d]
 
     implicit none
     
     type(itm_par), intent(IN)    :: par 
-    real(prec),    intent(INOUT) :: H_snow, alb_s 
-    real(prec),    intent(INOUT) :: smbi, smb, melt, runoff, refrz 
-    real(prec),    intent(IN)    :: z_srf, H_ice, S, t2m, PDDs 
-    real(prec),    intent(IN)    :: pr, sf
-    real(prec) :: refreezing_max, refrozen_snow_max
-    real(prec) :: smb, smbi
-    real(prec) :: melt_pot
+    real(prec),    intent(IN)    :: z_srf, H_ice, S, t2m, PDDs, pr, sf 
+    real(prec),    intent(INOUT) :: H_snow  
+    real(prec),    intent(OUT)   :: alb_s, smbi, smb, melt, runoff, refrz 
     
     ! Local variables
-    real(prec) :: rf, atrans 
-    real(prec) :: rfac  
-    real(prec) ::              refrozen_rain, runoff_rain
-    real(prec) :: melted_snow, refrozen_snow, runoff_snow
-    real(prec) :: melted_firn, refrozen_firn, runoff_firn
-    real(prec) :: melted_ice, snow_to_ice, new_ice
-    real(prec) :: melt, refrozen, runoff 
-
+    real(prec) :: melt_pot
+    real(prec) :: rf, atrans, rfac 
+    real(prec) :: melted_snow, melted_ice, snow_to_ice 
+    real(prec) :: refrz_rain, refrz_snow
+    
     ! Determine rainfall from precip and snowfall 
     rf = pr - sf
 
     ! Determine preliminary surface and planetary albedo
-    alb_s = calc_albedo_surface(par,z_srf,H_ice,H_snow,pdds)
+    alb_s = calc_albedo_surface(par,z_srf,H_ice,H_snow,PDDs)
 
     ! Add additional snowfall 
     H_snow  = H_snow + sf
@@ -61,7 +63,7 @@ contains
     melt_pot = calc_itm(S,t2m,alb_s,atrans,par%itm_c,par%itm_t)
 
     ! Determine how much snow and ice would be melted today
-    if (melt_pot .gt. H_snow)
+    if (melt_pot .gt. H_snow) then 
       
       ! All snow is melted, the rest of energy converted to melt some ice
       ! The rest of energy will go into melting ice
@@ -76,18 +78,18 @@ contains
       
     end if    
     
-    ! Now calculate the actual melt (total ablation)
+    ! Total ablation
     melt   = melted_snow + melted_ice
     
-    ! Remove melted snow, if any, from the snow height budget
+    ! Remove any melted snow from the snow height budget
     H_snow = H_snow - melted_snow
     
     ! Adjust the albedo (accounting for actual amount of melt)
-    alb_s = calc_albedo_surface(par,z_srf,H_ice,H_snow,pdds,melt=melt)
+    alb_s = calc_albedo_surface(par,z_srf,H_ice,H_snow,PDDs,melt=melt)
 
     ! Determine how much new ice is made from compression of remaining snow
     snow_to_ice = 0.d0
-    if (H_snow .gt. par%H_snow_max)
+    if (H_snow .gt. par%H_snow_max) then 
       ! Assume excess contributes to new ice
       snow_to_ice = (H_snow - par%H_snow_max)
       
@@ -97,15 +99,15 @@ contains
     
     ! Determine what fraction of the melted snow and rain will refreeze, 
     ! (Note: rf is zero if not on ice sheet or there is no snow cover)
-    if ( H_ice .gt. 0.d0 .and. H_snow .gt. 0.d0 )
+    if ( H_ice .gt. 0.0 .and. H_snow .gt. 0.0 ) then 
     
-        rfac = par%Pmaxfrac * sf / max(1d-5,pr)    ! max() here ensures no division by zero, if (snow+rain)==0, then rfac is zero anyway
+        rfac = par%Pmaxfrac * sf / max(1e-5,pr)    ! max() here ensures no division by zero, if (snow+rain)==0, then rfac is zero anyway
 
         ! Modify refreezing factor based on height of snow
-        if ( H_snow .gt. 2e3 )
-            rfac = 1.d0                                         ! refreezing factor is 1 for large snow heights.      
-        else if ( H_snow .gt. 1e3 )
-            rfac = rfac + ((H_snow-1e3)/(2e3-1e3) ) * (1.d0 - rfac) ! linear function increasing to rf=1 as H_snow increases to 2m.
+        if ( H_snow .gt. 2e3 ) then 
+            rfac = 1.0                                         ! refreezing factor is 1 for large snow heights.      
+        else if ( H_snow .gt. 1e3 ) then 
+            rfac = rfac + ((H_snow-1e3)/(2e3-1e3) ) * (1.0 - rfac) ! linear function increasing to rf=1 as H_snow increases to 2m.
         end if
     
     else 
@@ -113,40 +115,22 @@ contains
 
     end if
    
-    ! Determine the actual maximum amount of refreezing
-    refreezing_max    = H_snow                                ! Total refreezing depends on amount of snow left!
-    refrozen_rain     = min(rf*rfac,refreezing_max)           ! First rain takes up refreezing capacity
-    refrozen_snow_max = refreezing_max - refrozen_rain        ! Subtract rain from refreezing capacity to determine what's left for snow
-    refrozen_snow     = min(melted_snow*rfac,refrozen_snow_max) ! melted_snow uses remaining capacity if it needs it
-    refrozen          = refrozen_snow + refrozen_rain         ! Amount of ice created from refreezing
+    ! Determine the actual maximum amount of refreezing (limited to snowpack thickness)
+    refrz_rain     = min(rf*rfac,H_snow)                      ! First rain takes up refreezing capacity
+    refrz_snow     = min(melted_snow*rfac,H_snow-refrz_rain)  ! Melted_snow uses remaining capacity if it needs it
+    refrz          = refrz_snow + refrz_rain                  ! Total refreezing
 
-    ! Determine how much water will runoff for each component
-    runoff_snow = melted_snow - refrozen_snow                 ! Net snow melt
-    runoff_rain = rf - refrozen_rain                          ! Net rainfall
-    runoff      = runoff_snow + runoff_rain + melted_ice      ! Total runoff
-    
-    ! Get the total ice accumulated for the day
-    new_ice = snow_to_ice + refrozen
+    ! Determine net runoff
+    runoff      = (melted_snow-refrz_snow) + (rf-refrz_rain) + melted_ice
     
     ! Get the global surface mass balance
-    smb = snow + rain - runoff
+    smb = sf + rf - runoff
     
     ! Get the internal surface mass balance (what ice sheet model needs)
     ! These should apply at separate places, so
     ! smbi = -melted_ice, for negative mass balance
     ! smbi =     new_ice, for positive mass balance
-    smbi = new_ice - melted_ice
-    
-    ! Determine the actual melted amount of snow or snow+ice,
-    ! depending on where melt is taking place (for energy-balance)
-    ! Note: no refreezing off of ice sheet, so there total melt can
-    ! only equal the amount of snow melted
-    ! Note: this value can be negative too (negative contribution to energy flux)
-    if ( mask .eq. 0 ) 
-      dh = melt-refrozen       ! Technically refrozen=0 here, but include it anyway
-    else
-      dh = melted_snow-refrozen
-    end if
+    smbi = snow_to_ice + refrz - melted_ice
     
     return
   
@@ -175,9 +159,9 @@ contains
         ! 0-100 PDDs    = desert, 10mm
         ! 100-1000 PDDs = tundra (grass), linearly increasing between 10mm => 100mm
         ! 1000 PDDs +   = forest, 100mm
-        if ( PDDs .le. 100.0 ) 
+        if ( PDDs .le. 100.0 ) then 
             H_snow_crit = par%H_snow_crit_desert ! 10 mm
-        else if (PDDs .le. 1000.0) 
+        else if (PDDs .le. 1000.0) then 
             H_snow_crit = par%H_snow_crit_desert +   &
                 (par%H_snow_crit_forest-par%H_snow_crit_desert) * (PDDs-100.0)/(1000.0-100.0)
         else
