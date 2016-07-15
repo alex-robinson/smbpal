@@ -1,7 +1,8 @@
  module smbpal
 
     use smbpal_precision
-
+    use smb_itm 
+    
     implicit none 
 
     type smbpal_param_class
@@ -29,6 +30,7 @@
 
     type smbpal_class
         type(smbpal_param_class) :: par 
+        type(itm_par)            :: par_itm
         type(smbpal_state_class) :: now 
     end type
 
