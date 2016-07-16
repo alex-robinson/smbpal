@@ -25,6 +25,10 @@ module smb_itm
 
     end type 
 
+    private 
+    public :: itm_par_class, itm_par_load
+    public :: calc_snowpack_budget_day 
+
 contains
 
     subroutine itm_par_load(par,filename)
@@ -92,8 +96,8 @@ contains
     end subroutine itm_par_load
 
    
-  elemental subroutine snowpack_budget(par,z_srf,H_ice,S,t2m,PDDs,pr,sf, &
-                                       H_snow,alb_s,smbi,smb,melt,runoff,refrz)
+    elemental subroutine calc_snowpack_budget_day(par,z_srf,H_ice,S,t2m,PDDs,pr,sf, &
+                                           H_snow,alb_s,smbi,smb,melt,runoff,refrz)
     ! Determine the total melt, accumulation and surface mass balance at a given point
     !  * Modified from rembo subroutine `melt_budget`
     !  * input in mm water equivalent
@@ -102,18 +106,18 @@ contains
     !   runoff = rain + melt - refrz      [kg m2 / d ] == [mm / d]
 
     implicit none
-    
+
     type(itm_par_class), intent(IN)    :: par 
     real(prec),    intent(IN)    :: z_srf, H_ice, S, t2m, PDDs, pr, sf 
     real(prec),    intent(INOUT) :: H_snow  
     real(prec),    intent(OUT)   :: alb_s, smbi, smb, melt, runoff, refrz 
-    
+
     ! Local variables
     real(prec) :: melt_pot
     real(prec) :: rf, atrans, rfac 
     real(prec) :: melted_snow, melted_ice, snow_to_ice 
     real(prec) :: refrz_rain, refrz_snow
-    
+
     ! Determine rainfall from precip and snowfall 
     rf = pr - sf
 
@@ -122,7 +126,7 @@ contains
 
     ! Add additional snowfall 
     H_snow  = H_snow + sf
-    
+
     ! Get amount of potential melt from ITM scheme
     atrans   = calc_atmos_transmissivity(z_srf,par%trans_a,par%trans_b)
     melt_pot = calc_itm(S,t2m,alb_s,atrans,par%itm_c,par%itm_t)
@@ -142,13 +146,13 @@ contains
       melted_ice  = 0.d0
       
     end if    
-    
+
     ! Total ablation
     melt   = melted_snow + melted_ice
-    
+
     ! Remove any melted snow from the snow height budget
     H_snow = H_snow - melted_snow
-    
+
     ! Adjust the albedo (accounting for actual amount of melt)
     alb_s = calc_albedo_surface(par,z_srf,H_ice,H_snow,PDDs,melt=melt)
 
@@ -161,11 +165,11 @@ contains
       ! Reset snow height down to maximum height
       H_snow = par%H_snow_max
     end if
-    
+
     ! Determine what fraction of the melted snow and rain will refreeze, 
     ! (Note: rf is zero if not on ice sheet or there is no snow cover)
     if ( H_ice .gt. 0.0 .and. H_snow .gt. 0.0 ) then 
-    
+
         rfac = par%Pmaxfrac * sf / max(1e-5,pr)    ! max() here ensures no division by zero, if (snow+rain)==0, then rfac is zero anyway
 
         ! Modify refreezing factor based on height of snow
@@ -174,12 +178,12 @@ contains
         else if ( H_snow .gt. 1e3 ) then 
             rfac = rfac + ((H_snow-1e3)/(2e3-1e3) ) * (1.0 - rfac) ! linear function increasing to rf=1 as H_snow increases to 2m.
         end if
-    
+
     else 
         rfac = 0.0 
 
     end if
-   
+
     ! Determine the actual maximum amount of refreezing (limited to snowpack thickness)
     refrz_rain     = min(rf*rfac,H_snow)                      ! First rain takes up refreezing capacity
     refrz_snow     = min(melted_snow*rfac,H_snow-refrz_rain)  ! Melted_snow uses remaining capacity if it needs it
@@ -187,19 +191,19 @@ contains
 
     ! Determine net runoff
     runoff      = (melted_snow-refrz_snow) + (rf-refrz_rain) + melted_ice
-    
+
     ! Get the global surface mass balance
     smb = sf + rf - runoff
-    
+
     ! Get the internal surface mass balance (what ice sheet model needs)
     ! These should apply at separate places, so
     ! smbi = -melted_ice, for negative mass balance
     ! smbi =     new_ice, for positive mass balance
     smbi = snow_to_ice + refrz - melted_ice
-    
+
     return
-  
-  end subroutine snowpack_budget
+
+    end subroutine calc_snowpack_budget_day
     
     ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     ! Subroutine : g e t _ a l b e d o

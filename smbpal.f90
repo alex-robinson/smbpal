@@ -98,9 +98,9 @@ contains
             now%S = calc_insol_day(day,dble(lats),dble(time_bp),fldr="libs/insol/input")
 
             ! Call mass budget for today
-            call snowpack_budget(par%itm,z_srf,H_ice,now%S,now%t2m,now%teff,now%pr,now%sf, &
-                                 now%H_snow,now%alb_s,now%smbi,now%smb, &
-                                 now%melt,now%runoff,now%refrz)
+            call calc_snowpack_budget_day(par%itm,z_srf,H_ice,now%S,now%t2m,now%teff, &
+                                          now%pr,now%sf,now%H_snow,now%alb_s,now%smbi, &
+                                          now%smb,now%melt,now%runoff,now%refrz)
         end do 
 
 
