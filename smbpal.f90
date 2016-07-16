@@ -11,7 +11,7 @@
     type smbpal_param_class
         type(itm_par_class) :: itm
         character(len=16)   :: abl_method 
-        real(prec) :: Teff_sigma 
+        real(prec) :: Teff_sigma, sf_a, sf_b  
 
         real(prec) :: rho_sw
         real(prec) :: rho_ice
@@ -71,7 +71,7 @@ contains
     end subroutine smbpal_init
 
     subroutine smbpal_update_2temp(par,now,t2m_ann,t2m_sum,pr_ann, &
-                                   lats,z_srf,H_ice,time_bp)
+                                   lats,z_srf,H_ice,time_bp,sf_ann)
         ! Generate climate using two points in year (Tsum,Tann)
 
         implicit none 
@@ -81,19 +81,24 @@ contains
         real(prec), intent(IN) :: t2m_ann(:,:), t2m_sum(:,:)
         real(prec), intent(IN) ::  pr_ann(:,:), lats(:,:), z_srf(:,:), H_ice(:,:)
         real(prec), intent(IN) :: time_bp       ! years BP 
+        real(prec), intent(IN), optional :: sf_ann(:,:)
 
         ! Local variables
         integer, parameter :: ndays = 360   ! 360-day year 
         integer :: day 
 
-        do day = 1, ndays 
+        do day = 1, 1 
 
-            ! Determine t2m, pr, S and PDDs of today 
-!             now%t2m = cos(2*pi*day/real(ndays))
-            
-            ! Calculate effective temperature for each day (sums to annual PDDs)
+            ! Determine t2m, teff, pr, sf and S today 
+            now%t2m  = t2m_ann+(t2m_sum-t2m_ann)*cos(2.0*pi*real(day-15)/real(ndays))
+            now%teff = calc_temp_effective(now%t2m,par%Teff_sigma)
+            now%pr = pr_ann / real(ndays)
 
-            now%pr = pr_ann / real(ndays)   ! Evenly divided precip over the year (account for temp?)
+            if (present(sf_ann)) then 
+                now%sf = sf_ann / real(ndays)
+            else 
+                now%sf = calc_snowfrac(now%t2m,par%sf_a,par%sf_b)
+            end if 
 
             now%S = calc_insol_day(day,dble(lats),dble(time_bp),fldr="libs/insol/input")
 
@@ -169,13 +174,15 @@ contains
 
         ! Local parameter definitions (identical to object)
         character(len=16) :: abl_method
-        real(prec)        :: Teff_sigma
+        real(prec)        :: Teff_sigma, sf_a, sf_b
 
-        namelist /smbpal_par/ abl_method, Teff_sigma
+        namelist /smbpal_par/ abl_method, Teff_sigma, sf_a, sf_b
                 
         ! Store initial values in local parameter values 
         abl_method = par%abl_method
         Teff_sigma = par%Teff_sigma 
+        sf_a       = par%sf_a 
+        sf_b       = par%sf_b 
 
         ! Read parameters from input namelist file
         open(7,file=trim(filename))
@@ -185,6 +192,8 @@ contains
         ! Store local parameter values in output object
         par%abl_method = abl_method
         par%Teff_sigma = Teff_sigma 
+        par%sf_a       = sf_a 
+        par%sf_b       = sf_b 
 
         ! Also load itm parameters
         call itm_par_load(par%itm,filename)
@@ -270,12 +279,12 @@ contains
     !              is added individually
     !              (the same sigma as for pdd monthly can be used)
     ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    elemental function effectiveT(temp, sigma)
+    elemental function calc_temp_effective(temp, sigma) result(teff)
 
         implicit none
 
         real(4), intent(IN) :: temp, sigma
-        real(4) :: effectiveT
+        real(4) :: teff
         
         real(4) :: inv_sigma
         real(4), parameter :: inv_sqrt2   = 1.0/sqrt(2.0)
@@ -283,8 +292,8 @@ contains
 
         inv_sigma   = 1.0/sigma
 
-        effectiveT = sigma*inv_sqrt2pi*exp(-0.5*(temp*inv_sigma)**2)  &
-                     + temp*0.5*erfcc(-temp*inv_sigma*inv_sqrt2)
+        teff = sigma*inv_sqrt2pi*exp(-0.5*(temp*inv_sigma)**2)  &
+                  + temp*0.5*erfcc(-temp*inv_sigma*inv_sqrt2)
 
         ! Result is the assumed/felt/effective positive degrees, 
         ! given the actual temperature (accounting for fluctuations in day/month/etc, 
@@ -292,7 +301,7 @@ contains
                      
         return
 
-    end function effectiveT 
+    end function calc_temp_effective 
 
     ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     ! Function :  e r f c c

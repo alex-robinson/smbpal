@@ -312,10 +312,14 @@ contains
         implicit none
 
         real(prec), intent(IN) :: S, t2m, alb_s, atrans, c, t
-        real(prec) :: melt
+        real(prec) :: melt, t2m_c
+
+        ! Make sure temperature is in [Celcius]
+        t2m_c = t2m 
+        if (t2m .gt. 150.0) t2m_c = t2m - 273.15 
 
         ! Calculate potential melt [m/s]
-        melt = (atrans*(1.d0 - alb_s)*S + c + t*t2m) / (rho_w*L_m)
+        melt = (atrans*(1.d0 - alb_s)*S + c + t*t2m_c) / (rho_w*L_m)
 
         ! Convert: [m/s] => [mm/day], only positive melt
         melt = max( melt, 0.d0 ) * sec_day * 1d3  
