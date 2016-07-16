@@ -12,7 +12,7 @@ module smb_itm
     real(prec), parameter :: rho_w   = 1.d3      ! Density of pure water [kg/m3]
     real(prec), parameter :: L_m     = 3.35e5    ! Latent heat of melting [J/kg]
 
-    type itm_par
+    type itm_par_class
         real(prec) :: trans_a, trans_b 
         real(prec) :: itm_c, itm_t 
         real(prec) :: H_snow_max
@@ -27,6 +27,71 @@ module smb_itm
 
 contains
 
+    subroutine itm_par_load(par,filename)
+
+        type(itm_par_class)     :: par
+        character(len=*), intent(IN) :: filename 
+
+        ! Local parameter definitions (identical to object)
+        real(prec) :: trans_a, trans_b 
+        real(prec) :: itm_c, itm_t 
+        real(prec) :: H_snow_max
+        real(prec) :: Pmaxfrac
+        real(prec) :: H_snow_crit_desert
+        real(prec) :: H_snow_crit_forest
+        real(prec) :: melt_crit 
+        real(prec) :: alb_ocean, alb_land, alb_forest, alb_ice 
+        real(prec) :: alb_snow_dry, alb_snow_wet 
+
+        namelist /itm_par/ trans_a, trans_b, itm_c, itm_t, H_snow_max, Pmaxfrac, &
+        H_snow_crit_desert, H_snow_crit_forest, melt_crit, alb_ocean, alb_land, &
+        alb_forest, alb_ice, alb_snow_dry, alb_snow_wet 
+
+                
+        ! Store initial values in local parameter values 
+        trans_a            = par%trans_a
+        trans_b            = par%trans_b
+        itm_c              = par%itm_c
+        itm_t              = par%itm_t 
+        H_snow_max         = par%H_snow_max
+        Pmaxfrac           = par%Pmaxfrac
+        H_snow_crit_desert = par%H_snow_crit_desert
+        H_snow_crit_forest = par%H_snow_crit_forest
+        melt_crit          = par%melt_crit
+        alb_ocean          = par%alb_ocean
+        alb_land           = par%alb_land
+        alb_forest         = par%alb_forest
+        alb_ice            = par%alb_ice
+        alb_snow_dry       = par%alb_snow_dry
+        alb_snow_wet       = par%alb_snow_wet
+
+        ! Read parameters from input namelist file
+        open(7,file=trim(filename))
+        read(7,nml=itm_par)
+        close(7)
+
+        ! Store local parameter values in output object
+        par%trans_a            = trans_a
+        par%trans_b            = trans_b
+        par%itm_c              = itm_c
+        par%itm_t              = itm_t 
+        par%H_snow_max         = H_snow_max
+        par%Pmaxfrac           = Pmaxfrac
+        par%H_snow_crit_desert = H_snow_crit_desert
+        par%H_snow_crit_forest = H_snow_crit_forest
+        par%melt_crit          = melt_crit
+        par%alb_ocean          = alb_ocean
+        par%alb_land           = alb_land
+        par%alb_forest         = alb_forest
+        par%alb_ice            = alb_ice
+        par%alb_snow_dry       = alb_snow_dry
+        par%alb_snow_wet       = alb_snow_wet
+
+        return
+
+    end subroutine itm_par_load
+
+   
   elemental subroutine snowpack_budget(par,z_srf,H_ice,S,t2m,PDDs,pr,sf, &
                                        H_snow,alb_s,smbi,smb,melt,runoff,refrz)
     ! Determine the total melt, accumulation and surface mass balance at a given point
@@ -38,7 +103,7 @@ contains
 
     implicit none
     
-    type(itm_par), intent(IN)    :: par 
+    type(itm_par_class), intent(IN)    :: par 
     real(prec),    intent(IN)    :: z_srf, H_ice, S, t2m, PDDs, pr, sf 
     real(prec),    intent(INOUT) :: H_snow  
     real(prec),    intent(OUT)   :: alb_s, smbi, smb, melt, runoff, refrz 
@@ -145,7 +210,7 @@ contains
     
         implicit none
         
-        type(itm_par), intent(IN) :: par 
+        type(itm_par_class), intent(IN) :: par 
         real(prec),   intent(IN) :: z_srf, H_ice, H_snow, PDDs 
         real(prec),   intent(IN), optional :: melt
         real(prec) :: alb 

@@ -6,10 +6,12 @@
 
     implicit none 
 
+    real(4), parameter :: pi = 3.14159265359
+
     type smbpal_param_class
-        type(itm_par) :: itm
-        logical :: use_subgrid 
-        real(prec) :: par1 
+        type(itm_par_class) :: itm
+        character(len=16)   :: abl_method 
+        real(prec) :: Teff_sigma 
 
         real(prec) :: rho_sw
         real(prec) :: rho_ice
@@ -89,6 +91,8 @@ contains
             ! Determine t2m, pr, S and PDDs of today 
 !             now%t2m = cos(2*pi*day/real(ndays))
             
+            ! Calculate effective temperature for each day (sums to annual PDDs)
+
             now%pr = pr_ann / real(ndays)   ! Evenly divided precip over the year (account for temp?)
 
             now%S = calc_insol_day(day,dble(lats),dble(time_bp),fldr="libs/insol/input")
@@ -164,14 +168,14 @@ contains
         character(len=*), intent(IN) :: filename 
 
         ! Local parameter definitions (identical to object)
-        logical :: use_subgrid
-        real(prec) :: par1
+        character(len=16) :: abl_method
+        real(prec)        :: Teff_sigma
 
-        namelist /smbpal_par/ use_subgrid, par1
+        namelist /smbpal_par/ abl_method, Teff_sigma
                 
         ! Store initial values in local parameter values 
-        use_subgrid = par%use_subgrid
-        par1        = par%par1 
+        abl_method = par%abl_method
+        Teff_sigma = par%Teff_sigma 
 
         ! Read parameters from input namelist file
         open(7,file=trim(filename))
@@ -179,8 +183,11 @@ contains
         close(7)
 
         ! Store local parameter values in output object
-        par%use_subgrid = use_subgrid
-        par%par1        = par1 
+        par%abl_method = abl_method
+        par%Teff_sigma = Teff_sigma 
+
+        ! Also load itm parameters
+        call itm_par_load(par%itm,filename)
 
         return
 
@@ -193,7 +200,144 @@ contains
     !
     ! =======================================================
 
+    elemental subroutine calc_ablation_pdd(abl,sif,pdds,acc,csnow,csi,cice)
+        ! Determine total ablation based on input pdds
+        
+        implicit none 
 
+        real(4), intent(INOUT) :: abl, sif 
+        real(4), intent(IN)    :: pdds, acc
+        real(4), intent(IN)    :: csnow, csi, cice 
+
+        real(4) :: simax
+        real(4) :: abl_snow_pot, abl_ice_pot 
+
+        ! (* maximum amount of super. ice that can be formed *)
+        simax = acc*csi
+       
+        ! Determine the potential snowmelt (m) from the 
+        ! available pdds, then determine the potential ice melt (m)
+        ! from the left over pdds, if there are any.
+        abl_snow_pot = pdds*csnow 
+        abl_ice_pot  = max(0.0, (abl_snow_pot-acc)*cice/csnow)
+
+        ! Get the mass balance
+        if (abl_snow_pot .le. simax) then 
+            abl = 0.0 
+        else if (abl_snow_pot .gt. simax .and. abl_snow_pot .le. acc) then 
+            abl = abl_snow_pot - simax 
+        else if (abl_snow_pot .gt. acc .and. abl_ice_pot .le. simax) then 
+            abl = abl_snow_pot + (simax-abl_ice_pot)
+        else 
+            abl = abl_snow_pot + (abl_ice_pot-simax) 
+        end if  
+
+
+        ! Calculate the actual superimposed ice from refreezing 
+        if (abl_snow_pot .le. simax) then   
+            sif=pdds*csnow
+        else 
+            sif=simax 
+        endif
+
+        return 
+
+    end subroutine calc_ablation_pdd
+
+    elemental function calc_temp_surf(tann,sif) result(ts)
+        ! Surface temperature is equal to the annual mean
+        ! near-surface temperature + warming due to 
+        ! freezing of superimposed ice
+        implicit none 
+
+        real(4), intent(IN) :: tann, sif 
+        real(4) :: ts 
+
+        ts = (tann+26.6*sif)
+        ts = min(0.0,ts)
+
+        return 
+
+    end function calc_temp_surf
+    
+    ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    ! Subroutine : e f f e c t i v e T
+    ! Author     : Reinhard Calov
+    ! Purpose    : Computation of the positive degree days (PDD) with
+    !              statistical temperature fluctuations;
+    !              based on semi-analytical solution by Reinhard Calov.
+    !              This subroutine uses days as time unit, each day
+    !              is added individually
+    !              (the same sigma as for pdd monthly can be used)
+    ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    elemental function effectiveT(temp, sigma)
+
+        implicit none
+
+        real(4), intent(IN) :: temp, sigma
+        real(4) :: effectiveT
+        
+        real(4) :: inv_sigma
+        real(4), parameter :: inv_sqrt2   = 1.0/sqrt(2.0)
+        real(4), parameter :: inv_sqrt2pi = 1.0/sqrt(2.0*pi)
+
+        inv_sigma   = 1.0/sigma
+
+        effectiveT = sigma*inv_sqrt2pi*exp(-0.5*(temp*inv_sigma)**2)  &
+                     + temp*0.5*erfcc(-temp*inv_sigma*inv_sqrt2)
+
+        ! Result is the assumed/felt/effective positive degrees, 
+        ! given the actual temperature (accounting for fluctuations in day/month/etc, 
+        ! based on the sigma chosen)
+                     
+        return
+
+    end function effectiveT 
+
+    ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    ! Function :  e r f c c
+    ! Author   :  Reinhard Calov and Ralf Greve
+    ! Purpose  :  Returns the complementary error function erfc(x) with 
+    !             fractional error everywhere less than 1.2 x 10^(-7).
+    !             Credit: Press et al., 'Numerical recipes in Fortran 77'.
+    ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    elemental function erfcc(x)
+
+        implicit none
+            
+        real(4), intent(IN) :: x
+        real(4) :: erfcc
+
+        real(4) :: t, z
+
+        z = abs(x)
+        t = 1.0/(1.0+0.5*z)
+
+        erfcc = t*exp(-z*z-1.26551223+t*(1.00002368+t*(0.37409196+  &
+        t*(0.09678418+t*(-0.18628806+t*(0.27886807+t*  &
+        (-1.13520398+t*(1.48851587+t*(-0.82215223+  &
+        t*0.17087277)))))))))
+
+        if (x .lt. 0.0) erfcc = 2.0-erfcc
+
+        return
+      
+    end function erfcc
+
+    elemental function calc_snowfrac(t2m,a,b) result(f)
+        ! Return the fraction of snow from total precipitation
+        ! expected for a given temperature
+        
+        implicit none 
+
+        real(4), intent(IN) :: t2m, a, b 
+        real(4)             :: f 
+
+        f = -0.5*tanh(a*(t2m-b))+0.5 
+
+        return 
+
+    end function calc_snowfrac 
 
     ! =======================================================
     !

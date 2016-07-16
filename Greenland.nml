@@ -1,8 +1,9 @@
 &smbpal_par
-    use_subgrid = False
-    par1        = 1.0 
+    abl_method  = "itm"   ! "itm" or "pdd"
+    Teff_sigma  = 5.0     ! Standard deviation of temperature [K]
 
 /
+
 
 &itm_par
         
