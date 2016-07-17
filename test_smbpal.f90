@@ -62,8 +62,8 @@ program test
     ! Initialize the smbpal object and output file
     call smbpal_init(smb1,"Greenland.nml",x,y,lats)
     
-    call smbpal_update(smb1%par,smb1%now,t2m_ann,t2m_sum,pr_ann, &
-                            z_srf,H_ice,time_bp=0.0,file_out=file_out)
+    call smbpal_update(smb1,t2m_ann,t2m_sum,pr_ann, &
+                        z_srf,H_ice,time_bp=0.0,file_out=file_out)
     
     ! Finalize the smbpal object 
     call smbpal_end(smb1)

@@ -63,7 +63,7 @@ contains
         real(prec) :: x(:), y(:), lats(:,:)
 
         ! Local variables
-        integer :: nx, ny 
+        integer :: nx, ny, m  
         
         nx = size(x,1)
         ny = size(y,1)
@@ -83,32 +83,46 @@ contains
 
         ! Allocate the smbpal object 
         call smbpal_allocate(smb%now,nx,ny)
- 
+        call smbpal_allocate(smb%ann,nx,ny)
+    
+        do m = 1, 12 
+            call smbpal_allocate(smb%mon(m),nx,ny)
+        end do 
+
         return 
 
     end subroutine smbpal_init
 
-    subroutine smbpal_update_2temp(par,now,t2m_ann,t2m_sum,pr_ann, &
-                                   z_srf,H_ice,time_bp,sf_ann,file_out)
+    subroutine smbpal_update_2temp(smb,t2m_ann,t2m_sum,pr_ann, &
+                                   z_srf,H_ice,time_bp,sf_ann,file_out,file_out_mon,file_out_day)
         ! Generate climate using two points in year (Tsum,Tann)
 
         implicit none 
         
-        type(smbpal_param_class), intent(IN)    :: par
-        type(smbpal_state_class), intent(INOUT) :: now
+        type(smbpal_class), intent(INOUT) :: smb
         real(prec), intent(IN) :: t2m_ann(:,:), t2m_sum(:,:)
         real(prec), intent(IN) ::  pr_ann(:,:), z_srf(:,:), H_ice(:,:)
         real(prec), intent(IN) :: time_bp       ! years BP 
         real(prec), intent(IN), optional :: sf_ann(:,:)
-        character(len=*), intent(IN), optional :: file_out 
+        character(len=*), intent(IN), optional :: file_out      ! Annual output
+        character(len=*), intent(IN), optional :: file_out_mon  ! Monthly output
+        character(len=*), intent(IN), optional :: file_out_day  ! Daily output 
 
         ! Local variables
-        integer, parameter :: ndays = 360   ! 360-day year 
-        integer :: day 
+        integer, parameter :: ndays = 360   ! 360-day year
+        integer, parameter :: ndays_mon = 30   ! 30 days per month  
+        integer :: day, m, nx, ny, mnow, mday  
         real(prec) :: PDDs(size(t2m_ann,1),size(t2m_ann,2))
 
-        if (present(file_out)) then
-            call smbpal_write_init(par,file_out,z_srf,H_ice)
+        type(smbpal_param_class) :: par
+        type(smbpal_state_class) :: now
+
+        ! Fill in local versions for easier access 
+        par = smb%par 
+        now = smb%now 
+
+        if (present(file_out_day)) then
+            call smbpal_write_init(par,file_out_day,z_srf,H_ice)
         end if 
 
         ! First calculate PDDs for the whole year (input to itm)
@@ -117,6 +131,15 @@ contains
             now%t2m = t2m_ann-(t2m_sum-t2m_ann)*cos(2.0*pi*real(day-15)/real(ndays))
             PDDs    = PDDs + calc_temp_effective(now%t2m,par%Teff_sigma)
         end do 
+
+        ! Initialize averaging 
+        call smbpal_average(smb%ann,now,step="init")
+        do m = 1, 12 
+            call smbpal_average(smb%mon(m),now,step="init")
+        end do 
+
+        mnow = 1 
+        mday = 1 
 
         do day = 1, ndays
 
@@ -139,11 +162,36 @@ contains
                                           now%smb,now%melt,now%runoff,now%refrz)
         
 
-            if (present(file_out)) then 
-                call smbpal_write(now,file_out,time_bp=time_bp,day=day)
+            ! Get averages 
+            call smbpal_average(smb%ann,now,step="step")
+            call smbpal_average(smb%mon(mnow),now,step="step")
+
+            mday = mday + 1 
+            if (mday .eq. ndays_mon) then 
+                call smbpal_average(smb%mon(mnow),now,step="end",nt=real(ndays_mon))
+                mnow = mnow + 1
+                mday = 1 
+            end if 
+
+            if (present(file_out_day)) then 
+                ! Write daily output for this year 
+                call smbpal_write(now,file_out,ndat=day,time_bp=time_bp,step="day")
             end if 
     
         end do 
+
+        ! Finalize annual average 
+        call smbpal_average(smb%ann,now,step="end",nt=real(ndays))
+
+        ! Repopulate global now variable (in case it is needed)
+        smb%now = now 
+
+        ! Annual I/O 
+        if (present(file_out)) then
+            call smbpal_write_init(par,file_out,z_srf,H_ice)
+            call smbpal_write(smb%ann,file_out,ndat=1,time_bp=time_bp,step="ann")
+
+        end if 
 
 
         return 
@@ -385,6 +433,63 @@ contains
 
     end function calc_snowfrac 
 
+    subroutine smbpal_average(ave,now,step,nt)
+        implicit none 
+
+        type(smbpal_state_class), intent(INOUT) :: ave
+        type(smbpal_state_class), intent(IN)    :: now 
+        character(len=*)  :: step
+        real(prec), optional :: nt 
+        
+        call field_average(ave%t2m,    now%t2m,    step,nt)
+        call field_average(ave%teff,   now%teff,   step,nt)
+        call field_average(ave%pr,     now%pr,     step,nt)
+        call field_average(ave%sf,     now%sf,     step,nt)
+        call field_average(ave%S,      now%S,      step,nt)
+        
+        call field_average(ave%H_snow, now%H_snow, step,nt)
+        call field_average(ave%alb_s,  now%alb_s,  step,nt)
+        call field_average(ave%smbi,   now%smbi,   step,nt)
+        call field_average(ave%smb,    now%smb,    step,nt)
+        call field_average(ave%melt,   now%melt,   step,nt)
+        call field_average(ave%runoff, now%runoff, step,nt)
+        call field_average(ave%refrz,  now%refrz,  step,nt)
+        
+        return
+
+    end subroutine smbpal_average
+
+    subroutine field_average(ave,now,step,nt)
+        ! Generic routine to average a field through time 
+
+        implicit none 
+        real(prec), intent(INOUT)    :: ave(:,:)
+        real(prec), intent(IN)       :: now(:,:)
+        character(len=*), intent(IN) :: step
+        real(prec), intent(IN), optional :: nt 
+
+        if (trim(step) .eq. "init") then
+            ! Initialize field to zero  
+            ave = 0.0 
+        else if (trim(step) .eq. "step") then 
+            ! Sum intermediate steps
+            ave = ave + now 
+        else if (trim(step) .eq. "end") then
+            if (.not.  present(nt)) then 
+                write(*,*) "Averaging step total not provided."
+                stop 
+            end if 
+            ! Divide by total steps
+            ave = ave / nt 
+        else
+            write(*,*) "Step not recognized: ",trim(step)
+            stop 
+        end if 
+
+        return 
+
+    end subroutine field_average 
+
     ! =======================================================
     !
     ! smbpal I/O
@@ -400,10 +505,11 @@ contains
         real(prec), intent(IN), optional :: z_srf(:,:), H_ice(:,:) 
 
         call nc_create(filename)
-        call nc_write_dim(filename,"day",  x=1,nx=360,dx=1)
-        call nc_write_dim(filename,"month",x=1,nx=12,dx=1)
         call nc_write_dim(filename,"xc",x=par%x)
         call nc_write_dim(filename,"yc",x=par%y)
+        call nc_write_dim(filename,"day",  x=1,nx=360,dx=1)
+        call nc_write_dim(filename,"month",x=1,nx=12,dx=1)
+        call nc_write_dim(filename,"time",x=0.0,units="ka BP",unlimited=.TRUE.)
         
         ! Write the 2D latitude field to file
         call nc_write(filename,"lat2D",par%lats,dim1="xc",dim2="yc")
@@ -415,48 +521,55 @@ contains
 
     end subroutine smbpal_write_init 
 
-    subroutine smbpal_write(now,filename,time_bp,day,mon)
+    subroutine smbpal_write(now,filename,ndat,time_bp,step)
 
         implicit none 
 
         type(smbpal_state_class), intent(IN) :: now 
         character(len=*),         intent(IN) :: filename 
+        integer,                  intent(IN) :: ndat 
         real(prec),               intent(IN) :: time_bp  
-        integer, intent(IN), optional :: day, mon 
+        character(len=*),         intent(IN) :: step  
 
         ! Local variables 
         real(prec) :: ka_bp 
-        character(len=16) :: dim3  
         integer :: dim3_val, nx, ny  
 
         ka_bp = time_bp * 1e-3 
 
-        if (present(day) .and. present(mon)) then 
-            write(*,*) "smbpal_write:: error: day and mon arguments found, &
-                       &expecting either day or mon. Choose one and try again."
+        if (trim(step) .ne. "ann" .and. trim(step) .ne. "mon" .and. trim(step) .ne. "day") then 
+            write(*,*) "smbpal_write:: error: step should be one of: ann, mon or day."
             stop 
-        else if (.not. present(day) .and. .not. present(mon)) then 
-            write(*,*) "smbpal_write:: error: expecting either day or mon argument, try again."
-            stop 
-        end if 
-
-        if (present(day)) then 
-            dim3 = "day"
-            dim3_val = day 
-        else if (present(mon)) then 
-            dim3 = "mon"
-            dim3_val = mon 
         end if 
 
         nx = size(now%t2m,1)
         ny = size(now%t2m,2)
 
+            
         ! Write the variables
-        call nc_write(filename,"t2m",now%t2m,dim1="xc",dim2="yc",dim3=dim3, &
-                      start=[1,1,dim3_val],count=[nx,ny,1])
-        call nc_write(filename,"S",now%S,dim1="xc",dim2="yc",dim3=dim3, &
-                      start=[1,1,dim3_val],count=[nx,ny,1])
+        if (trim(step) .eq. "ann") then 
+            ! Write the annual mean with time as 3rd dimension 
 
+            ! Update the timestep 
+            call nc_write(filename,"time",ka_bp,dim1="time",start=[ndat],count=[1])
+
+            call nc_write(filename,"t2m",now%t2m,dim1="xc",dim2="yc",dim3="time", &
+                          start=[1,1,ndat],count=[nx,ny,1])
+            call nc_write(filename,"S",now%S,dim1="xc",dim2="yc",dim3="time", &
+                          start=[1,1,ndat],count=[nx,ny,1])
+
+        else 
+            ! Write the step along the year (mon or day)
+
+            ! Update the timestep 
+            call nc_write(filename,"time",ka_bp,dim1="time",start=[1],count=[1])
+
+            call nc_write(filename,"t2m",now%t2m,dim1="xc",dim2="yc",dim3=trim(step), &
+                          start=[1,1,ndat],count=[nx,ny,1])
+            call nc_write(filename,"S",now%S,dim1="xc",dim2="yc",dim3=trim(step), &
+                          start=[1,1,ndat],count=[nx,ny,1])
+
+        end if 
 
         return 
 
