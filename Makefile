@@ -120,7 +120,7 @@ $(objdir)/smbpal_precision.o: $(srcdir)/smbpal_precision.f90
 $(objdir)/smb_itm.o: $(srcdir)/smb_itm.f90 $(objdir)/smbpal_precision.o
 	$(FC) $(DFLAGS) $(FLAGS) -c -o $@ $<
 
-$(objdir)/smbpal.o: $(srcdir)/smbpal.f90 $(objdir)/nml.o $(objdir)/smbpal_precision.o
+$(objdir)/smbpal.o: $(srcdir)/smbpal.f90 $(objdir)/smbpal_precision.o $(objdir)/nml.o $(objdir)/insolation.o $(objdir)/ncio.o
 	$(FC) $(DFLAGS) $(FLAGS) -c -o $@ $<
 
 # Group the object files together

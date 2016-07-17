@@ -11,17 +11,23 @@ program test
     real(4) :: insol_pt 
 
     ! Input data information
-    character(len=256) :: file_topo, file_clim 
+    character(len=256) :: file_topo, file_clim, file_out  
     integer :: nx, ny 
+    real(4), allocatable :: x(:), y(:)
     real(4), allocatable :: lats(:,:), z_srf(:,:), H_ice(:,:)
     real(4), allocatable :: t2m(:,:,:), pr(:,:,:), sf(:,:,:)
     real(4), allocatable :: t2m_ann(:,:), t2m_sum(:,:), pr_ann(:,:), sf_ann(:,:)
+
+    ! Output file 
+    file_out = "output/smbpal_eraint_pdd.nc"
 
     ! Load domain test data (Greenland)
     file_topo = "data/GRL-20KM_TOPO-B13_gl0.05.nc"
     nx = nc_size(file_topo,"xc")
     ny = nc_size(file_topo,"yc")
-    allocate(lats(nx,ny),z_srf(nx,ny),H_ice(nx,ny))
+    allocate(x(nx),y(ny),lats(nx,ny),z_srf(nx,ny),H_ice(nx,ny))
+    call nc_read(file_topo,"xc",x)
+    call nc_read(file_topo,"yc",y)
     call nc_read(file_topo,"lat2D",lats)
     call nc_read(file_topo,"zs",   z_srf)
     call nc_read(file_topo,"H",    H_ice)
@@ -53,12 +59,12 @@ program test
     write(*,"(a15,2f10.3)") "pr_ann: ",  minval(pr_ann),  maxval(pr_ann)
     write(*,"(a15,2f10.3)") "sf_ann: ",  minval(sf_ann),  maxval(sf_ann)
     
-    ! Initialize the smbpal object 
-    call smbpal_init(smb1,"Greenland.nml",nx=nx,ny=ny)
-
+    ! Initialize the smbpal object and output file
+    call smbpal_init(smb1,"Greenland.nml",x,y,lats)
     
     call smbpal_update(smb1%par,smb1%now,t2m_ann,t2m_sum,pr_ann, &
-                                   lats,z_srf,H_ice,time_bp=0.0)
+                            z_srf,H_ice,time_bp=0.0,file_out=file_out)
+    
     ! Finalize the smbpal object 
     call smbpal_end(smb1)
 

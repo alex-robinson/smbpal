@@ -2,6 +2,7 @@
 
     use smbpal_precision
     use insolation
+    use ncio
     use smb_itm 
 
     implicit none 
@@ -13,6 +14,8 @@
         character(len=16)   :: abl_method 
         real(prec) :: Teff_sigma, sf_a, sf_b  
 
+        real(prec), allocatable :: x(:), y(:)
+        real(prec), allocatable :: lats(:,:)           ! Latitude of domain [deg N]
         real(prec) :: rho_sw
         real(prec) :: rho_ice
 
@@ -33,7 +36,7 @@
 
     type smbpal_class
         type(smbpal_param_class) :: par 
-        type(smbpal_state_class) :: now, mon, ann
+        type(smbpal_state_class) :: now, mon(12), ann
     end type
 
     interface smbpal_update 
@@ -47,21 +50,36 @@
     public :: smbpal_init 
     public :: smbpal_update
     public :: smbpal_end 
+    public :: smbpal_write_init, smbpal_write
 
 contains 
 
-    subroutine smbpal_init(smb,filename,nx,ny)
+    subroutine smbpal_init(smb,filename,x,y,lats)
 
         implicit none 
 
         type(smbpal_class) :: smb
         character(len=*), intent(IN)  :: filename  ! Parameter file 
+        real(prec) :: x(:), y(:), lats(:,:)
 
         ! Local variables
         integer :: nx, ny 
         
+        nx = size(x,1)
+        ny = size(y,1)
+
         ! Load smbpal parameters
         call smbpal_par_load(smb%par,filename)
+
+        ! Additionally define dimension info 
+        if (allocated(smb%par%x)) deallocate(smb%par%x)
+        if (allocated(smb%par%y)) deallocate(smb%par%y)
+        if (allocated(smb%par%lats)) deallocate(smb%par%lats)
+        allocate(smb%par%x(nx),smb%par%y(ny),smb%par%lats(nx,ny))
+
+        smb%par%x    = x 
+        smb%par%y    = y 
+        smb%par%lats = lats 
 
         ! Allocate the smbpal object 
         call smbpal_allocate(smb%now,nx,ny)
@@ -71,7 +89,7 @@ contains
     end subroutine smbpal_init
 
     subroutine smbpal_update_2temp(par,now,t2m_ann,t2m_sum,pr_ann, &
-                                   lats,z_srf,H_ice,time_bp,sf_ann)
+                                   z_srf,H_ice,time_bp,sf_ann,file_out)
         ! Generate climate using two points in year (Tsum,Tann)
 
         implicit none 
@@ -79,18 +97,31 @@ contains
         type(smbpal_param_class), intent(IN)    :: par
         type(smbpal_state_class), intent(INOUT) :: now
         real(prec), intent(IN) :: t2m_ann(:,:), t2m_sum(:,:)
-        real(prec), intent(IN) ::  pr_ann(:,:), lats(:,:), z_srf(:,:), H_ice(:,:)
+        real(prec), intent(IN) ::  pr_ann(:,:), z_srf(:,:), H_ice(:,:)
         real(prec), intent(IN) :: time_bp       ! years BP 
         real(prec), intent(IN), optional :: sf_ann(:,:)
+        character(len=*), intent(IN), optional :: file_out 
 
         ! Local variables
         integer, parameter :: ndays = 360   ! 360-day year 
         integer :: day 
+        real(prec) :: PDDs(size(t2m_ann,1),size(t2m_ann,2))
 
-        do day = 1, 1 
+        if (present(file_out)) then
+            call smbpal_write_init(par,file_out,z_srf,H_ice)
+        end if 
+
+        ! First calculate PDDs for the whole year (input to itm)
+        PDDs = 0.0 
+        do day = 1, ndays
+            now%t2m = t2m_ann-(t2m_sum-t2m_ann)*cos(2.0*pi*real(day-15)/real(ndays))
+            PDDs    = PDDs + calc_temp_effective(now%t2m,par%Teff_sigma)
+        end do 
+
+        do day = 1, ndays
 
             ! Determine t2m, teff, pr, sf and S today 
-            now%t2m  = t2m_ann+(t2m_sum-t2m_ann)*cos(2.0*pi*real(day-15)/real(ndays))
+            now%t2m  = t2m_ann-(t2m_sum-t2m_ann)*cos(2.0*pi*real(day-15)/real(ndays))
             now%teff = calc_temp_effective(now%t2m,par%Teff_sigma)
             now%pr = pr_ann / real(ndays)
 
@@ -100,12 +131,18 @@ contains
                 now%sf = calc_snowfrac(now%t2m,par%sf_a,par%sf_b)
             end if 
 
-            now%S = calc_insol_day(day,dble(lats),dble(time_bp),fldr="libs/insol/input")
+            now%S = calc_insol_day(day,dble(par%lats),dble(time_bp),fldr="libs/insol/input")
 
             ! Call mass budget for today
-            call calc_snowpack_budget_day(par%itm,z_srf,H_ice,now%S,now%t2m,now%teff, &
+            call calc_snowpack_budget_day(par%itm,z_srf,H_ice,now%S,now%t2m,PDDs, &
                                           now%pr,now%sf,now%H_snow,now%alb_s,now%smbi, &
                                           now%smb,now%melt,now%runoff,now%refrz)
+        
+
+            if (present(file_out)) then 
+                call smbpal_write(now,file_out,time_bp=time_bp,day=day)
+            end if 
+    
         end do 
 
 
@@ -347,6 +384,84 @@ contains
         return 
 
     end function calc_snowfrac 
+
+    ! =======================================================
+    !
+    ! smbpal I/O
+    !
+    ! =======================================================
+
+    subroutine smbpal_write_init(par,filename,z_srf,H_ice)
+
+        implicit none 
+
+        type(smbpal_param_class), intent(IN) :: par 
+        character(len=*),         intent(IN) :: filename 
+        real(prec), intent(IN), optional :: z_srf(:,:), H_ice(:,:) 
+
+        call nc_create(filename)
+        call nc_write_dim(filename,"day",  x=1,nx=360,dx=1)
+        call nc_write_dim(filename,"month",x=1,nx=12,dx=1)
+        call nc_write_dim(filename,"xc",x=par%x)
+        call nc_write_dim(filename,"yc",x=par%y)
+        
+        ! Write the 2D latitude field to file
+        call nc_write(filename,"lat2D",par%lats,dim1="xc",dim2="yc")
+
+        if (present(z_srf)) call nc_write(filename,"z_srf",z_srf,dim1="xc",dim2="yc")
+        if (present(H_ice)) call nc_write(filename,"H_ice",H_ice,dim1="xc",dim2="yc")
+
+        return 
+
+    end subroutine smbpal_write_init 
+
+    subroutine smbpal_write(now,filename,time_bp,day,mon)
+
+        implicit none 
+
+        type(smbpal_state_class), intent(IN) :: now 
+        character(len=*),         intent(IN) :: filename 
+        real(prec),               intent(IN) :: time_bp  
+        integer, intent(IN), optional :: day, mon 
+
+        ! Local variables 
+        real(prec) :: ka_bp 
+        character(len=16) :: dim3  
+        integer :: dim3_val, nx, ny  
+
+        ka_bp = time_bp * 1e-3 
+
+        if (present(day) .and. present(mon)) then 
+            write(*,*) "smbpal_write:: error: day and mon arguments found, &
+                       &expecting either day or mon. Choose one and try again."
+            stop 
+        else if (.not. present(day) .and. .not. present(mon)) then 
+            write(*,*) "smbpal_write:: error: expecting either day or mon argument, try again."
+            stop 
+        end if 
+
+        if (present(day)) then 
+            dim3 = "day"
+            dim3_val = day 
+        else if (present(mon)) then 
+            dim3 = "mon"
+            dim3_val = mon 
+        end if 
+
+        nx = size(now%t2m,1)
+        ny = size(now%t2m,2)
+
+        ! Write the variables
+        call nc_write(filename,"t2m",now%t2m,dim1="xc",dim2="yc",dim3=dim3, &
+                      start=[1,1,dim3_val],count=[nx,ny,1])
+        call nc_write(filename,"S",now%S,dim1="xc",dim2="yc",dim3=dim3, &
+                      start=[1,1,dim3_val],count=[nx,ny,1])
+
+
+        return 
+
+    end subroutine smbpal_write 
+
 
     ! =======================================================
     !
