@@ -554,10 +554,31 @@ contains
             call nc_write(filename,"time",ka_bp,dim1="time",start=[ndat],count=[1])
 
             call nc_write(filename,"t2m",now%t2m,dim1="xc",dim2="yc",dim3="time", &
-                          start=[1,1,ndat],count=[nx,ny,1])
+                          start=[1,1,ndat],count=[nx,ny,1],long_name="Near-surface temperature",units="K")
             call nc_write(filename,"S",now%S,dim1="xc",dim2="yc",dim3="time", &
-                          start=[1,1,ndat],count=[nx,ny,1])
+                          start=[1,1,ndat],count=[nx,ny,1],long_name="Solar insolation (TOA)",units="W m**-2")
+            call nc_write(filename,"pr",now%pr,dim1="xc",dim2="yc",dim3="time", &
+                          start=[1,1,ndat],count=[nx,ny,1],long_name="Precipitation",units="mm d**-1")
+            call nc_write(filename,"sf",now%sf,dim1="xc",dim2="yc",dim3="time", &
+                          start=[1,1,ndat],count=[nx,ny,1],long_name="Snowfall",units="mm d**-1")
+            call nc_write(filename,"PDDs",now%teff*360,dim1="xc",dim2="yc",dim3="time", &
+                          start=[1,1,ndat],count=[nx,ny,1],long_name="Positive degree days",units="d K")
 
+            call nc_write(filename,"H_snow",now%H_snow,dim1="xc",dim2="yc",dim3="time", &
+                          start=[1,1,ndat],count=[nx,ny,1],long_name="Snowpack thickness",units="mm w.e.")
+            call nc_write(filename,"alb_s",now%alb_s,dim1="xc",dim2="yc",dim3="time", &
+                          start=[1,1,ndat],count=[nx,ny,1],long_name="Surface albedo",units="1")
+            call nc_write(filename,"smbi",now%smbi,dim1="xc",dim2="yc",dim3="time", &
+                          start=[1,1,ndat],count=[nx,ny,1],long_name="Surface mass balance (ice)",units="mm d**-1")
+            call nc_write(filename,"smb",now%smb,dim1="xc",dim2="yc",dim3="time", &
+                          start=[1,1,ndat],count=[nx,ny,1],long_name="Surface mass balance (snow)",units="mm d**-1")
+            call nc_write(filename,"melt",now%melt,dim1="xc",dim2="yc",dim3="time", &
+                          start=[1,1,ndat],count=[nx,ny,1],long_name="Total melt",units="mm d**-1")
+            call nc_write(filename,"runoff",now%runoff,dim1="xc",dim2="yc",dim3="time", &
+                          start=[1,1,ndat],count=[nx,ny,1],long_name="Net runoff",units="mm d**-1")
+            call nc_write(filename,"refrz",now%refrz,dim1="xc",dim2="yc",dim3="time", &
+                          start=[1,1,ndat],count=[nx,ny,1],long_name="Refreezing",units="mm d**-1")
+            
         else 
             ! Write the step along the year (mon or day)
 
