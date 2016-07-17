@@ -8,7 +8,6 @@ program test
 
 
     type(smbpal_class) :: smb1 
-    real(4) :: insol_pt 
 
     ! Input data information
     character(len=256) :: file_topo, file_clim, file_out  
@@ -17,6 +16,8 @@ program test
     real(4), allocatable :: lats(:,:), z_srf(:,:), H_ice(:,:)
     real(4), allocatable :: t2m(:,:,:), pr(:,:,:), sf(:,:,:)
     real(4), allocatable :: t2m_ann(:,:), t2m_sum(:,:), pr_ann(:,:), sf_ann(:,:)
+
+    integer :: k 
 
     ! Output file 
     file_out = "output/smbpal_eraint_pdd.nc"
@@ -62,9 +63,16 @@ program test
     ! Initialize the smbpal object and output file
     call smbpal_init(smb1,"Greenland.nml",x,y,lats)
     
-    call smbpal_update(smb1,t2m_ann,t2m_sum,pr_ann, &
-                        z_srf,H_ice,time_bp=0.0,file_out=file_out)
+    ! Equilibrate snowpack 
+    do k = 1, 100
+        write(*,*) "k = ", k 
+        call smbpal_update(smb1,t2m_ann,t2m_sum,pr_ann,z_srf,H_ice,time_bp=0.0+(k-1),file_out=file_out)
+    end do 
+
+    call smbpal_update(smb1,t2m_ann,t2m_sum,pr_ann,z_srf,H_ice,time_bp=100.0, &
+                        file_out=file_out)
     
+
     ! Finalize the smbpal object 
     call smbpal_end(smb1)
 

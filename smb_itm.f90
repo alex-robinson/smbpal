@@ -160,9 +160,7 @@ contains
     snow_to_ice = 0.d0
     if (H_snow .gt. par%H_snow_max) then 
       ! Assume excess contributes to new ice
-      snow_to_ice = (H_snow - par%H_snow_max)
-      
-      ! Reset snow height down to maximum height
+      snow_to_ice = H_snow - par%H_snow_max
       H_snow = par%H_snow_max
     end if
 

@@ -7,7 +7,7 @@
 
     implicit none 
 
-    real(4), parameter :: pi = 3.14159265359
+    real(prec), parameter :: pi = 3.14159265359
 
     type smbpal_param_class
         type(itm_par_class) :: itm
@@ -89,12 +89,15 @@ contains
             call smbpal_allocate(smb%mon(m),nx,ny)
         end do 
 
+        ! Initialize the state variables 
+        smb%now%H_snow = smb%par%itm%H_snow_max 
+
         return 
 
     end subroutine smbpal_init
 
-    subroutine smbpal_update_2temp(smb,t2m_ann,t2m_sum,pr_ann, &
-                                   z_srf,H_ice,time_bp,sf_ann,file_out,file_out_mon,file_out_day)
+    subroutine smbpal_update_2temp(smb,t2m_ann,t2m_sum,pr_ann,z_srf,H_ice,time_bp,sf_ann, &
+                                   file_out,file_out_mon,file_out_day,init)
         ! Generate climate using two points in year (Tsum,Tann)
 
         implicit none 
@@ -107,8 +110,10 @@ contains
         character(len=*), intent(IN), optional :: file_out      ! Annual output
         character(len=*), intent(IN), optional :: file_out_mon  ! Monthly output
         character(len=*), intent(IN), optional :: file_out_day  ! Daily output 
+        logical, intent(IN), optional :: init 
 
         ! Local variables
+        logical :: init_now 
         integer, parameter :: ndays = 360   ! 360-day year
         integer, parameter :: ndays_mon = 30   ! 30 days per month  
         integer :: day, m, nx, ny, mnow, mday  
@@ -117,10 +122,15 @@ contains
         type(smbpal_param_class) :: par
         type(smbpal_state_class) :: now
 
+        ! Determine whether this is first time running (for output)
+        init_now = .FALSE. 
+        if (present(init)) init_now = init 
+
         ! Fill in local versions for easier access 
         par = smb%par 
         now = smb%now 
 
+        ! Initialize annual output file if needed
         if (present(file_out_day)) then
             call smbpal_write_init(par,file_out_day,z_srf,H_ice)
         end if 
@@ -146,12 +156,12 @@ contains
             ! Determine t2m, teff, pr, sf and S today 
             now%t2m  = t2m_ann-(t2m_sum-t2m_ann)*cos(2.0*pi*real(day-15)/real(ndays))
             now%teff = calc_temp_effective(now%t2m,par%Teff_sigma)
-            now%pr = pr_ann / real(ndays)
+            now%pr = pr_ann
 
             if (present(sf_ann)) then 
-                now%sf = sf_ann / real(ndays)
+                now%sf = sf_ann
             else 
-                now%sf = calc_snowfrac(now%t2m,par%sf_a,par%sf_b)
+                now%sf = now%pr * calc_snowfrac(now%t2m,par%sf_a,par%sf_b)
             end if 
 
             now%S = calc_insol_day(day,dble(par%lats),dble(time_bp),fldr="libs/insol/input")
@@ -175,7 +185,7 @@ contains
 
             if (present(file_out_day)) then 
                 ! Write daily output for this year 
-                call smbpal_write(now,file_out,ndat=day,time_bp=time_bp,step="day")
+                call smbpal_write(now,file_out,time_bp=time_bp,step="day",nstep=day)
             end if 
     
         end do 
@@ -188,11 +198,19 @@ contains
 
         ! Annual I/O 
         if (present(file_out)) then
-            call smbpal_write_init(par,file_out,z_srf,H_ice)
-            call smbpal_write(smb%ann,file_out,ndat=1,time_bp=time_bp,step="ann")
+            if (init_now) call smbpal_write_init(par,file_out,z_srf,H_ice)
+            call smbpal_write(smb%ann,file_out,time_bp=time_bp,step="ann")
 
         end if 
 
+        ! Monthly I/O 
+        if (present(file_out_mon)) then
+            call smbpal_write_init(par,file_out_mon,z_srf,H_ice)
+            do m = 1, 12
+                call smbpal_write(smb%mon(m),file_out_mon,time_bp=time_bp,step="mon",nstep=m)
+            end do 
+
+        end if 
 
         return 
 
@@ -299,12 +317,12 @@ contains
         
         implicit none 
 
-        real(4), intent(INOUT) :: abl, sif 
-        real(4), intent(IN)    :: pdds, acc
-        real(4), intent(IN)    :: csnow, csi, cice 
+        real(prec), intent(INOUT) :: abl, sif 
+        real(prec), intent(IN)    :: pdds, acc
+        real(prec), intent(IN)    :: csnow, csi, cice 
 
-        real(4) :: simax
-        real(4) :: abl_snow_pot, abl_ice_pot 
+        real(prec) :: simax
+        real(prec) :: abl_snow_pot, abl_ice_pot 
 
         ! (* maximum amount of super. ice that can be formed *)
         simax = acc*csi
@@ -344,8 +362,8 @@ contains
         ! freezing of superimposed ice
         implicit none 
 
-        real(4), intent(IN) :: tann, sif 
-        real(4) :: ts 
+        real(prec), intent(IN) :: tann, sif 
+        real(prec) :: ts 
 
         ts = (tann+26.6*sif)
         ts = min(0.0,ts)
@@ -368,17 +386,20 @@ contains
 
         implicit none
 
-        real(4), intent(IN) :: temp, sigma
-        real(4) :: teff
+        real(prec), intent(IN) :: temp, sigma
+        real(prec) :: teff
         
-        real(4) :: inv_sigma
-        real(4), parameter :: inv_sqrt2   = 1.0/sqrt(2.0)
-        real(4), parameter :: inv_sqrt2pi = 1.0/sqrt(2.0*pi)
+        real(prec) :: temp_c, inv_sigma
+        real(prec), parameter :: inv_sqrt2   = 1.0/sqrt(2.0)
+        real(prec), parameter :: inv_sqrt2pi = 1.0/sqrt(2.0*pi)
 
         inv_sigma   = 1.0/sigma
 
-        teff = sigma*inv_sqrt2pi*exp(-0.5*(temp*inv_sigma)**2)  &
-                  + temp*0.5*erfcc(-temp*inv_sigma*inv_sqrt2)
+        temp_c = temp 
+        if (temp .gt. 150.0) temp_c = temp-273.15 
+
+        teff = sigma*inv_sqrt2pi*exp(-0.5*(temp_c*inv_sigma)**2)  &
+                  + temp_c*0.5*erfcc(-temp_c*inv_sigma*inv_sqrt2)
 
         ! Result is the assumed/felt/effective positive degrees, 
         ! given the actual temperature (accounting for fluctuations in day/month/etc, 
@@ -399,10 +420,10 @@ contains
 
         implicit none
             
-        real(4), intent(IN) :: x
-        real(4) :: erfcc
+        real(prec), intent(IN) :: x
+        real(prec) :: erfcc
 
-        real(4) :: t, z
+        real(prec) :: t, z
 
         z = abs(x)
         t = 1.0/(1.0+0.5*z)
@@ -424,8 +445,8 @@ contains
         
         implicit none 
 
-        real(4), intent(IN) :: t2m, a, b 
-        real(4)             :: f 
+        real(prec), intent(IN) :: t2m, a, b 
+        real(prec)             :: f 
 
         f = -0.5*tanh(a*(t2m-b))+0.5 
 
@@ -521,19 +542,20 @@ contains
 
     end subroutine smbpal_write_init 
 
-    subroutine smbpal_write(now,filename,ndat,time_bp,step)
+    subroutine smbpal_write(now,filename,time_bp,step,nstep)
 
         implicit none 
 
         type(smbpal_state_class), intent(IN) :: now 
         character(len=*),         intent(IN) :: filename 
-        integer,                  intent(IN) :: ndat 
         real(prec),               intent(IN) :: time_bp  
         character(len=*),         intent(IN) :: step  
+        integer, intent(IN), optional        :: nstep 
 
         ! Local variables 
         real(prec) :: ka_bp 
-        integer :: dim3_val, nx, ny  
+        integer :: ndat, nx, ny, nt   
+        real(prec), allocatable :: time(:) 
 
         ka_bp = time_bp * 1e-3 
 
@@ -545,7 +567,17 @@ contains
         nx = size(now%t2m,1)
         ny = size(now%t2m,2)
 
-            
+        ! Determine timestep to be written 
+        nt = nc_size(filename,"time")
+        allocate(time(nt))
+        call nc_read(filename,"time",time)
+        
+        if (maxval(time) .lt. ka_bp) then 
+            ndat = nt+1 
+        else 
+            ndat = minloc(abs(time-ka_bp),1)
+        end if 
+
         ! Write the variables
         if (trim(step) .eq. "ann") then 
             ! Write the annual mean with time as 3rd dimension 
@@ -582,13 +614,18 @@ contains
         else 
             ! Write the step along the year (mon or day)
 
+            if (.not. present(nstep)) then 
+                write(*,*) "smbpal_write:: error: nstep must be given for 'day' or 'mon' writing."
+                stop 
+            end if 
+
             ! Update the timestep 
             call nc_write(filename,"time",ka_bp,dim1="time",start=[1],count=[1])
 
             call nc_write(filename,"t2m",now%t2m,dim1="xc",dim2="yc",dim3=trim(step), &
-                          start=[1,1,ndat],count=[nx,ny,1])
+                          start=[1,1,nstep],count=[nx,ny,1])
             call nc_write(filename,"S",now%S,dim1="xc",dim2="yc",dim3=trim(step), &
-                          start=[1,1,ndat],count=[nx,ny,1])
+                          start=[1,1,nstep],count=[nx,ny,1])
 
         end if 
 
