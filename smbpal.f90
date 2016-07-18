@@ -12,7 +12,7 @@
     type smbpal_param_class
         type(itm_par_class) :: itm
         character(len=16)   :: abl_method 
-        real(prec) :: Teff_sigma, sf_a, sf_b  
+        real(prec) :: Teff_sigma, sf_a, sf_b, firn_fac  
 
         real(prec), allocatable :: x(:), y(:)
         real(prec), allocatable :: lats(:,:)           ! Latitude of domain [deg N]
@@ -25,13 +25,15 @@
         real(prec), allocatable   :: t2m(:,:)            ! Surface temperature [K]
         real(prec), allocatable   :: pr(:,:), sf(:,:)    ! Precip, snowfall [mm/a or mm/d]
         real(prec), allocatable   :: S(:,:)              ! Insolation [W/m2]
-        real(prec), allocatable   :: teff(:,:)           ! Effective temp. (ie, PDDs) [num. of days]
+        real(prec), allocatable   :: PDDs(:,:)           ! Effective temp. (ie, PDDs) [num. of days]
+        real(prec), allocatable   :: tsrf(:,:)           ! Effective temp. (ie, PDDs) [num. of days]
         
         ! Prognostic variables
         real(prec), allocatable   :: H_snow(:,:)         ! Snow thickness [mm]
         real(prec), allocatable   :: alb_s(:,:)          ! Surface albedo 
         real(prec), allocatable   :: smbi(:,:), smb(:,:) ! Surface mass balance [mm/a or mm/d]
         real(prec), allocatable   :: melt(:,:), runoff(:,:), refrz(:,:)   ! smb components
+        real(prec), allocatable   :: melt_net(:,:)       ! Net surface melt, for calculating surface temp [mm]
     end type 
 
     type smbpal_class
@@ -44,13 +46,6 @@
         module procedure smbpal_update_monthly
         module procedure smbpal_update_daily
     end interface 
-
-    type table_teff_type
-        real(prec), allocatable :: temp(:)
-        real(prec), allocatable :: teff(:) 
-    end type 
-
-    type(table_teff_type) :: tbl_teff 
 
     private
     public :: smbpal_class
@@ -100,9 +95,6 @@ contains
         ! Initialize the state variables 
         smb%now%H_snow = smb%par%itm%H_snow_max 
 
-!         ! Generate lookup table for PDDs
-!         call populate_table_temp_effective(tbl_teff,delta=1.0,sigma=smb%par%Teff_sigma)
-    
         ! Test calculation of insolation to load orbital params 
         tmp = calc_insol_day(180,65.d0,0.d0,fldr="libs/insol/input")
 
@@ -111,7 +103,7 @@ contains
     end subroutine smbpal_init
 
     subroutine smbpal_update_2temp(smb,t2m_ann,t2m_sum,pr_ann,z_srf,H_ice,time_bp,sf_ann, &
-                                   file_out,file_out_mon,file_out_day,init,calc_mon,write_now)
+                                   file_out,file_out_mon,file_out_day,write_init,calc_mon,write_now)
         ! Generate climate using two points in year (Tsum,Tann)
 
         implicit none 
@@ -124,21 +116,20 @@ contains
         character(len=*), intent(IN), optional :: file_out      ! Annual output
         character(len=*), intent(IN), optional :: file_out_mon  ! Monthly output
         character(len=*), intent(IN), optional :: file_out_day  ! Daily output 
-        logical, intent(IN), optional :: init, calc_mon, write_now
+        logical, intent(IN), optional :: write_init, calc_mon, write_now
 
         ! Local variables
         logical :: init_now, calc_monthly, write_out_now   
         integer, parameter :: ndays = 360   ! 360-day year
         integer, parameter :: ndays_mon = 30   ! 30 days per month  
         integer :: day, m, nx, ny, mnow, mday  
-        real(prec) :: PDDs(size(t2m_ann,1),size(t2m_ann,2))
 
         type(smbpal_param_class) :: par
         type(smbpal_state_class) :: now
 
         ! Determine whether this is first time running (for output)
         init_now = .FALSE. 
-        if (present(init)) init_now = init 
+        if (present(write_init)) init_now = write_init 
 
         calc_monthly = .FALSE. 
         if (present(calc_mon))     calc_monthly = calc_mon 
@@ -157,15 +148,11 @@ contains
         end if 
 
         ! First calculate PDDs for the whole year (input to itm)
-        PDDs = 0.0 
+        now%PDDs = 0.0 
         do day = 1, ndays, 10
-            now%t2m = t2m_ann-(t2m_sum-t2m_ann)*cos(2.0*pi*real(day-15)/real(ndays))
-            PDDs    = PDDs + calc_temp_effective(now%t2m,par%Teff_sigma)*10.0
-!             PDDs    = PDDs + lookup_temp_effective(now%t2m,par%Teff_sigma,tbl_teff)
+            now%t2m  = t2m_ann-(t2m_sum-t2m_ann)*cos(2.0*pi*real(day-15)/real(ndays))
+            now%PDDs = now%PDDs + calc_temp_effective(now%t2m-273.15,par%Teff_sigma)*10.0
         end do 
-
-        ! Store in teff variable for now 
-        now%teff = PDDs 
 
         ! Initialize averaging 
         call smbpal_average(smb%ann,now,step="init")
@@ -181,10 +168,8 @@ contains
 
         do day = 1, ndays
 
-            ! Determine t2m, teff, pr, sf and S today 
+            ! Determine t2m, pr, sf and S today 
             now%t2m  = t2m_ann-(t2m_sum-t2m_ann)*cos(2.0*pi*real(day-15)/real(ndays)) 
-!             now%teff = calc_temp_effective(now%t2m,par%Teff_sigma)
-!             now%teff = lookup_temp_effective(now%t2m,par%Teff_sigma,tbl_teff)
             now%pr = pr_ann
 
             if (present(sf_ann)) then 
@@ -196,9 +181,9 @@ contains
             now%S = calc_insol_day(day,dble(par%lats),dble(time_bp),fldr="libs/insol/input")
 
             ! Call mass budget for today
-            call calc_snowpack_budget_day(par%itm,z_srf,H_ice,now%S,now%t2m,PDDs, &
+            call calc_snowpack_budget_day(par%itm,z_srf,H_ice,now%S,now%t2m,now%PDDs, &
                                           now%pr,now%sf,now%H_snow,now%alb_s,now%smbi, &
-                                          now%smb,now%melt,now%runoff,now%refrz)
+                                          now%smb,now%melt,now%runoff,now%refrz,now%melt_net)
         
 
             ! Get averages 
@@ -224,6 +209,9 @@ contains
 
         ! Finalize annual average 
         call smbpal_average(smb%ann,now,step="end",nt=real(ndays))
+
+        ! Calculate surface temp 
+        smb%ann%tsrf = calc_temp_surf(smb%ann%t2m,smb%ann%melt_net*ndays,fac=par%firn_fac)
 
         ! Repopulate global now variable (in case it is needed)
         smb%now = now 
@@ -309,15 +297,16 @@ contains
 
         ! Local parameter definitions (identical to object)
         character(len=16) :: abl_method
-        real(prec)        :: Teff_sigma, sf_a, sf_b
+        real(prec)        :: Teff_sigma, sf_a, sf_b, firn_fac 
 
-        namelist /smbpal_par/ abl_method, Teff_sigma, sf_a, sf_b
+        namelist /smbpal_par/ abl_method, Teff_sigma, sf_a, sf_b, firn_fac
                 
         ! Store initial values in local parameter values 
         abl_method = par%abl_method
         Teff_sigma = par%Teff_sigma 
         sf_a       = par%sf_a 
         sf_b       = par%sf_b 
+        firn_fac   = par%firn_fac 
 
         ! Read parameters from input namelist file
         open(7,file=trim(filename))
@@ -329,7 +318,8 @@ contains
         par%Teff_sigma = Teff_sigma 
         par%sf_a       = sf_a 
         par%sf_b       = sf_b 
-
+        par%firn_fac   = firn_fac 
+        
         ! Also load itm parameters
         call itm_par_load(par%itm,filename)
 
@@ -388,89 +378,22 @@ contains
 
     end subroutine calc_ablation_pdd
 
-    elemental function calc_temp_surf(tann,sif) result(ts)
+    elemental function calc_temp_surf(tann,melt_net,fac) result(ts)
         ! Surface temperature is equal to the annual mean
         ! near-surface temperature + warming due to 
-        ! freezing of superimposed ice
+        ! freezing of superimposed ice - cooling due to melt
         implicit none 
 
-        real(prec), intent(IN) :: tann, sif 
+        real(prec), intent(IN) :: tann, melt_net, fac 
         real(prec) :: ts 
 
-        ts = (tann+26.6*sif)
-        ts = min(0.0,ts)
+        ts = (tann+fac*melt_net)    ! Positive melt_net (refreezing) warms firn
+        ts = min(273.15,ts)         ! Limit temps to freezing temperature
 
         return 
 
     end function calc_temp_surf
     
-    elemental function lookup_temp_effective(temp, sigma, tbl) result(teff)
-        ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-        ! Subroutine : e f f e c t i v e T
-        ! Author     : Reinhard Calov
-        ! Purpose    : Computation of the positive degree days (PDD) with
-        !              statistical temperature fluctuations;
-        !              based on semi-analytical solution by Reinhard Calov.
-        !              This subroutine uses days as time unit, each day
-        !              is added individually
-        !              (the same sigma as for pdd monthly can be used)
-        ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-        
-        implicit none
-
-        real(prec), intent(IN) :: temp, sigma
-        type(table_teff_type), intent(IN) :: tbl 
-        real(prec) :: teff
-        
-        real(prec) :: temp_c
-        integer :: i 
-
-        temp_c = temp 
-        if (temp .gt. 150.0) temp_c = temp-273.15 
-
-        do i = 1, size(tbl%temp)
-            if (tbl%temp(i) .gt. temp_c) exit 
-        end do 
-
-        if (i .eq. 1) then 
-            teff = tbl%teff(i) 
-        else
-            teff = (tbl%teff(i)-tbl%teff(i-1)) * (temp-tbl%temp(i))/(tbl%temp(i)-tbl%temp(i-1))
-        end if 
-
-!         i = minloc(abs(temp_c-tbl%temp),1)
-!         teff = tbl%teff(i)
-          
-        return
-
-    end function lookup_temp_effective 
-
-    subroutine populate_table_temp_effective(tbl,delta,sigma)
-
-        implicit none 
-
-        type(table_teff_type), intent(OUT) :: tbl 
-        real(prec), intent(IN) :: delta
-        real(prec), intent(IN) :: sigma  
-        integer :: i, nt  
-        real(prec), parameter :: temp_min = -20.0   ! [C]
-        real(prec), parameter :: temp_max =  30.0   ! [C]
-        
-        if (allocated(tbl%temp))  deallocate(tbl%temp)
-        if (allocated(tbl%teff))  deallocate(tbl%teff)
-
-        nt = ceiling( (temp_max-temp_min) / delta + 1)
-        allocate(tbl%temp(nt),tbl%teff(nt))
-
-        do i = 1, nt 
-            tbl%temp(i) = temp_min + (i-1)*delta
-            tbl%teff(i) = calc_temp_effective(tbl%temp(i), sigma)
-        end do 
-
-        return 
-
-    end subroutine populate_table_temp_effective
-
     elemental function calc_temp_effective(temp, sigma) result(teff)
         ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
         ! Subroutine : e f f e c t i v e T
@@ -483,6 +406,8 @@ contains
         !              (the same sigma as for pdd monthly can be used)
         ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
+        ! temp = [degrees Celcius] !!! 
+
         implicit none
 
         real(prec), intent(IN) :: temp, sigma
@@ -494,11 +419,8 @@ contains
 
         inv_sigma   = 1.0/sigma
 
-        temp_c = temp 
-        if (temp .gt. 150.0) temp_c = temp-273.15 
-
-        teff = sigma*inv_sqrt2pi*exp(-0.5*(temp_c*inv_sigma)**2)  &
-                  + temp_c*0.5*erfcc(-temp_c*inv_sigma*inv_sqrt2)
+        teff = sigma*inv_sqrt2pi*exp(-0.5*(temp*inv_sigma)**2)  &
+                  + temp*0.5*erfcc(-temp*inv_sigma*inv_sqrt2)
 
         ! Result is the assumed/felt/effective positive degrees, 
         ! given the actual temperature (accounting for fluctuations in day/month/etc, 
@@ -563,7 +485,6 @@ contains
         real(prec), optional :: nt 
         
         call field_average(ave%t2m,    now%t2m,    step,nt)
-        call field_average(ave%teff,   now%teff,   step,nt)
         call field_average(ave%pr,     now%pr,     step,nt)
         call field_average(ave%sf,     now%sf,     step,nt)
         call field_average(ave%S,      now%S,      step,nt)
@@ -575,6 +496,12 @@ contains
         call field_average(ave%melt,   now%melt,   step,nt)
         call field_average(ave%runoff, now%runoff, step,nt)
         call field_average(ave%refrz,  now%refrz,  step,nt)
+        
+        call field_average(ave%melt_net,now%melt_net,step,nt)
+        
+        ! Annual values, averaged for completeness 
+        call field_average(ave%PDDs,   now%PDDs,   step,nt)
+        call field_average(ave%tsrf,   now%tsrf,   step,nt)
         
         return
 
@@ -693,8 +620,10 @@ contains
                           start=[1,1,ndat],count=[nx,ny,1],long_name="Precipitation",units="mm d**-1")
             call nc_write(filename,"sf",now%sf,dim1="xc",dim2="yc",dim3="time", &
                           start=[1,1,ndat],count=[nx,ny,1],long_name="Snowfall",units="mm d**-1")
-            call nc_write(filename,"PDDs",now%teff*360,dim1="xc",dim2="yc",dim3="time", &
+            call nc_write(filename,"PDDs",now%PDDs,dim1="xc",dim2="yc",dim3="time", &
                           start=[1,1,ndat],count=[nx,ny,1],long_name="Positive degree days",units="d K")
+            call nc_write(filename,"tsrf",now%tsrf,dim1="xc",dim2="yc",dim3="time", &
+                          start=[1,1,ndat],count=[nx,ny,1],long_name="Ice surface temperature",units="K")
 
             call nc_write(filename,"H_snow",now%H_snow,dim1="xc",dim2="yc",dim3="time", &
                           start=[1,1,ndat],count=[nx,ny,1],long_name="Snowpack thickness",units="mm w.e.")
@@ -755,7 +684,8 @@ contains
         allocate(now%pr(nx,ny))
         allocate(now%sf(nx,ny))
         allocate(now%S(nx,ny))
-        allocate(now%teff(nx,ny))
+        allocate(now%PDDs(nx,ny))
+        allocate(now%tsrf(nx,ny))
         allocate(now%H_snow(nx,ny))
         allocate(now%alb_s(nx,ny))
         allocate(now%smbi(nx,ny))
@@ -763,6 +693,8 @@ contains
         allocate(now%melt(nx,ny))
         allocate(now%runoff(nx,ny))
         allocate(now%refrz(nx,ny))
+
+        allocate(now%melt_net(nx,ny))
 
         return
 
@@ -779,7 +711,8 @@ contains
         if (allocated(now%pr))       deallocate(now%pr)
         if (allocated(now%sf))       deallocate(now%sf)
         if (allocated(now%S))        deallocate(now%S)
-        if (allocated(now%teff))     deallocate(now%teff)
+        if (allocated(now%PDDs))     deallocate(now%PDDs)
+        if (allocated(now%tsrf))     deallocate(now%tsrf)
         if (allocated(now%H_snow))   deallocate(now%H_snow)
         if (allocated(now%alb_s))    deallocate(now%alb_s)
         if (allocated(now%smbi))     deallocate(now%smbi)
@@ -787,6 +720,8 @@ contains
         if (allocated(now%melt))     deallocate(now%melt)
         if (allocated(now%runoff))   deallocate(now%runoff)
         if (allocated(now%refrz))    deallocate(now%refrz)
+        
+        if (allocated(now%melt_net))   deallocate(now%melt_net)
         
         return
 

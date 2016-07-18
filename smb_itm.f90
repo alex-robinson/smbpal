@@ -97,7 +97,7 @@ contains
 
    
     elemental subroutine calc_snowpack_budget_day(par,z_srf,H_ice,S,t2m,PDDs,pr,sf, &
-                                           H_snow,alb_s,smbi,smb,melt,runoff,refrz)
+                                           H_snow,alb_s,smbi,smb,melt,runoff,refrz,melt_net)
     ! Determine the total melt, accumulation and surface mass balance at a given point
     !  * Modified from rembo subroutine `melt_budget`
     !  * input in mm water equivalent
@@ -110,7 +110,8 @@ contains
     type(itm_par_class), intent(IN)    :: par 
     real(prec),    intent(IN)    :: z_srf, H_ice, S, t2m, PDDs, pr, sf 
     real(prec),    intent(INOUT) :: H_snow  
-    real(prec),    intent(OUT)   :: alb_s, smbi, smb, melt, runoff, refrz 
+    real(prec),    intent(OUT)   :: alb_s, smbi, smb, melt, runoff, refrz
+    real(prec),    intent(OUT)   :: melt_net  
 
     ! Local variables
     real(prec) :: melt_pot
@@ -129,7 +130,7 @@ contains
 
     ! Get amount of potential melt from ITM scheme
     atrans   = calc_atmos_transmissivity(z_srf,par%trans_a,par%trans_b)
-    melt_pot = calc_itm(S,t2m,alb_s,atrans,par%itm_c,par%itm_t)
+    melt_pot = calc_itm(S,t2m-273.15,alb_s,atrans,par%itm_c,par%itm_t)
 
     ! Determine how much snow and ice would be melted today
     if (melt_pot .gt. H_snow) then 
@@ -198,6 +199,13 @@ contains
     ! smbi = -melted_ice, for negative mass balance
     ! smbi =     new_ice, for positive mass balance
     smbi = snow_to_ice + refrz - melted_ice
+
+    ! Calculate net melt (refreezing minus total melt) for surface temp energy adjustment
+    if (H_ice .gt. 0.0) then 
+        melt_net = refrz - melt 
+    else 
+        melt_net = refrz - melted_snow    ! refrz is zero here, but keep it for consistency
+    end if 
 
     return
 
@@ -307,17 +315,14 @@ contains
     ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     elemental function calc_itm(S,t2m,alb_s,atrans,c,t) result(melt)
         ! Determine the potential melt rate
+        ! t2m = [degrees Celcius] !!!
         implicit none
 
         real(prec), intent(IN) :: S, t2m, alb_s, atrans, c, t
-        real(prec) :: melt, t2m_c
-
-        ! Make sure temperature is in [Celcius]
-        t2m_c = t2m 
-        if (t2m .gt. 150.0) t2m_c = t2m - 273.15 
+        real(prec) :: melt
 
         ! Calculate potential melt [m/s]
-        melt = (atrans*(1.d0 - alb_s)*S + c + t*t2m_c) / (rho_w*L_m)
+        melt = (atrans*(1.d0 - alb_s)*S + c + t*t2m) / (rho_w*L_m)
 
         ! Convert: [m/s] => [mm/day], only positive melt
         melt = max( melt, 0.d0 ) * sec_day * 1d3  
