@@ -4,11 +4,10 @@
     use insolation
     use interp_time 
     use ncio
+    use smb_pdd 
     use smb_itm 
 
     implicit none 
-
-    real(prec), parameter :: pi = 3.14159265359
 
     integer, parameter :: ndays = 360   ! 360-day year
     integer, parameter :: ndays_mon = 30   ! 30 days per month  
@@ -17,6 +16,7 @@
         type(itm_par_class) :: itm
         character(len=16)   :: abl_method 
         real(prec) :: Teff_sigma, sf_a, sf_b, firn_fac  
+        real(prec) :: mm_snow, mm_ice 
 
         real(prec), allocatable :: x(:), y(:)
         real(prec), allocatable :: lats(:,:)           ! Latitude of domain [deg N]
@@ -48,7 +48,6 @@
     interface smbpal_update 
         module procedure smbpal_update_2temp
         module procedure smbpal_update_monthly
-        module procedure smbpal_update_daily
     end interface 
 
     private
@@ -255,54 +254,90 @@ contains
         logical, intent(IN), optional :: write_init, calc_mon, write_now
 
         ! Local variables
-        integer :: ndays_daily, k   
+        logical :: init_now, write_out_now
+        integer :: ndays_daily, k, day, k1   
         integer, allocatable :: daily(:)
         real(prec), allocatable :: t2m_daily(:,:,:), pr_daily(:,:,:)
         real(prec), allocatable :: sf_daily(:,:,:)
         double precision, allocatable :: tmp(:,:,:)
         
-        ndays_daily = 37
-        allocate(daily(ndays_daily))
-        allocate(t2m_daily(size(t2m,1),size(t2m,2),ndays_daily))
-        allocate(pr_daily(size(t2m,1),size(t2m,2),ndays_daily))
-        allocate(sf_daily(size(t2m,1),size(t2m,2),ndays_daily))
-        allocate(tmp(size(t2m,1),size(t2m,2),ndays_daily))
+        real(prec), allocatable :: t2m_ann(:,:), pr_ann(:,:), sf_ann(:,:) 
+
+        write_out_now = .FALSE. 
+        if (present(write_now) .and. present(file_out)) write_out_now = write_now 
+
+        ! Determine whether this is first time running (for output)
+        init_now = .FALSE. 
+        if (write_out_now .and. present(write_init)) init_now = write_init 
+
+        if (trim(smb%par%abl_method) .eq. "itm") then 
+            ndays_daily = 37
+            allocate(daily(ndays_daily))
+            allocate(t2m_daily(size(t2m,1),size(t2m,2),ndays_daily))
+            allocate(pr_daily(size(t2m,1),size(t2m,2),ndays_daily))
+            allocate(sf_daily(size(t2m,1),size(t2m,2),ndays_daily))
+            allocate(tmp(size(t2m,1),size(t2m,2),ndays_daily))
+            
+            ! Define daily days
+            do k = 1, ndays_daily-1 
+                daily(k) = 1 + (k-1)*(ndays / (ndays_daily-1))
+            end do 
+            daily(ndays_daily) = ndays 
+
+            ! Generate daily climate from monthly input 
+            call convert_monthly_daily_3D(dble(t2m),tmp,days=daily)
+            t2m_daily = tmp 
+            call convert_monthly_daily_3D(dble(pr),tmp,days=daily)
+            pr_daily = tmp 
+            call convert_monthly_daily_3D(dble(sf),tmp,days=daily)
+            sf_daily = tmp 
+            where(sf_daily .lt. 0.0) sf_daily = 0.0 
+
+            ! Call daily subroutine 
+            call smbpal_update_itm(smb,daily,t2m_daily,pr_daily,sf_daily,z_srf,H_ice,time_bp, &
+                                   file_out_mon,file_out_day,write_init,calc_mon,write_now)
         
-        ! Define daily days
-        do k = 1, ndays_daily-1 
-            daily(k) = 1 + (k-1)*(ndays / (ndays_daily-1))
-        end do 
-        daily(ndays_daily) = ndays 
+        else 
+            ! PDD method 
 
+            allocate(t2m_ann(size(t2m,1),size(t2m,2)))
+            allocate(pr_ann(size(t2m,1),size(t2m,2)))
+            allocate(sf_ann(size(t2m,1),size(t2m,2)))
+            
+            t2m_ann = sum(t2m,dim=3) / 12.0 
+            pr_ann  = sum(pr,dim=3)  / 12.0 
+            sf_ann  = sum(sf,dim=3)  / 12.0 
+            
+            write(*,*) "t2m_ann: ", minval(t2m_ann), maxval(t2m_ann)
+            write(*,*) "pr_ann: ",  minval(pr_ann),  maxval(pr_ann)
+            write(*,*) "sf_ann: ",  minval(sf_ann),  maxval(sf_ann)
+            
+            ! First calculate PDDs for the whole year (input to pdd)
+            smb%now%PDDs = 0.0 
+            do k = 1, 12
+                smb%now%t2m  = t2m(:,:,k)
+                smb%now%PDDs = smb%now%PDDs + calc_temp_effective(smb%now%t2m-273.15,smb%par%Teff_sigma)*30.0
+            end do 
 
-        ! Generate daily climate from monthly input 
-        call convert_monthly_daily_3D(dble(t2m),tmp,days=daily)
-        t2m_daily = tmp 
-        call convert_monthly_daily_3D(dble(pr),tmp,days=daily)
-        pr_daily = tmp 
-        call convert_monthly_daily_3D(dble(sf),tmp,days=daily)
-        sf_daily = tmp 
-        where(sf_daily .lt. 0.0) sf_daily = 0.0 
+            write(*,*) "PDDs: ",  minval(smb%now%PDDs),  maxval(smb%now%PDDs)
+            
+            smb%ann = smbpal_update_pdd(smb%par,smb%now,z_srf,H_ice, &
+                                        t2m_ann,pr_ann,sf_ann)
+        end if 
 
-!         write(*,*) "t2m_daily: ", minval(t2m_daily), maxval(t2m_daily)
-!         write(*,*) "pr_daily: ",  minval(pr_daily),  maxval(pr_daily)
-!         write(*,*) "sf_daily: ",  minval(sf_daily),  maxval(sf_daily)
-!         stop 
+        ! Annual I/O 
+        if (write_out_now) then
+            if (init_now) call smbpal_write_init(smb%par,file_out,z_srf,H_ice)
+            call smbpal_write(smb%ann,file_out,time_bp=time_bp,step="ann")
 
-        ! Call daily subroutine 
-        call smbpal_update_daily(smb,daily,t2m_daily,pr_daily,sf_daily, &
-                                 z_srf,H_ice,time_bp, &
-                                 file_out,file_out_mon,file_out_day, &
-                                 write_init,calc_mon,write_now)
-        
+        end if 
+
         return 
 
     end subroutine smbpal_update_monthly
 
-
-
-    subroutine smbpal_update_daily(smb,days,t2m,pr,sf,z_srf,H_ice,time_bp, &
-                                   file_out,file_out_mon,file_out_day,write_init,calc_mon,write_now)
+    subroutine smbpal_update_itm(smb,days,t2m,pr,sf,z_srf,H_ice,time_bp, &
+                                   file_out_mon,file_out_day,write_init,calc_mon,write_now)
         ! Generate smb using daily input of climate [nx,ny,nday]
 
         implicit none 
@@ -311,8 +346,7 @@ contains
         integer, intent(IN) :: days(:)
         real(prec), intent(IN) :: t2m(:,:,:), pr(:,:,:), sf(:,:,:)
         real(prec), intent(IN) ::  z_srf(:,:), H_ice(:,:)
-        real(prec), intent(IN) :: time_bp       ! years BP 
-        character(len=*), intent(IN), optional :: file_out      ! Annual output
+        real(prec), intent(IN) :: time_bp       ! years BP
         character(len=*), intent(IN), optional :: file_out_mon  ! Monthly output
         character(len=*), intent(IN), optional :: file_out_day  ! Daily output 
         logical, intent(IN), optional :: write_init, calc_mon, write_now
@@ -342,11 +376,6 @@ contains
         par = smb%par 
         now = smb%now 
 
-        ! Initialize annual output file if needed
-        if (write_out_now .and. present(file_out_day)) then
-            if (init_now) call smbpal_write_init(par,file_out_day,z_srf,H_ice)
-        end if 
-
         ! First calculate PDDs for the whole year (input to itm)
         now%PDDs = 0.0 
         do day = 1, ndays, 10
@@ -366,6 +395,11 @@ contains
 
         mnow = 1 
         mday = 0 
+
+        ! Initialize daily output file if needed
+        if (write_out_now .and. present(file_out_day)) then
+            if (init_now) call smbpal_write_init(par,file_out_day,z_srf,H_ice)
+        end if 
 
         do day = 1, ndays
 
@@ -399,7 +433,7 @@ contains
 
             if (write_out_now .and. present(file_out_day)) then 
                 ! Write daily output for this year 
-                call smbpal_write(now,file_out,time_bp=time_bp,step="day",nstep=day)
+                call smbpal_write(now,file_out_day,time_bp=time_bp,step="day",nstep=day)
             end if 
     
         end do 
@@ -413,13 +447,6 @@ contains
         ! Repopulate global now variable (in case it is needed)
         smb%now = now 
 
-        ! Annual I/O 
-        if (write_out_now .and. present(file_out)) then
-            if (init_now) call smbpal_write_init(par,file_out,z_srf,H_ice)
-            call smbpal_write(smb%ann,file_out,time_bp=time_bp,step="ann")
-
-        end if 
-
         ! Monthly I/O 
         if (write_out_now .and. calc_monthly .and. present(file_out_mon)) then
             if (init_now) call smbpal_write_init(par,file_out_mon,z_srf,H_ice)
@@ -431,7 +458,42 @@ contains
 
         return 
 
-    end subroutine smbpal_update_daily
+    end subroutine smbpal_update_itm
+
+    function smbpal_update_pdd(par,now,z_srf,H_ice,t2m_ann,pr_ann,sf_ann) result(ann)
+
+        implicit none 
+
+        type(smbpal_param_class) :: par 
+        type(smbpal_state_class) :: now
+        real(prec) :: z_srf(:,:), H_ice(:,:), t2m_ann(:,:), pr_ann(:,:), sf_ann(:,:)
+
+        type(smbpal_state_class) :: ann
+
+        ! Store known annual values
+        ann      = now 
+        ann%PDDs = now%PDDs 
+        ann%t2m  = t2m_ann 
+        ann%pr   = pr_ann 
+        ann%sf   = sf_ann
+
+        ! Get ablation
+        call calc_ablation_pdd(ann%melt,ann%melt_net,ann%PDDs,ann%sf*360.0, &
+                                par%mm_snow,par%mm_ice,par%itm%Pmaxfrac)
+
+        ! Get melt rate [mm/a] => [mm/d]
+        ann%melt = ann%melt / 360.0 
+
+        ! Get surface mass balance 
+        ann%smb  = ann%sf - ann%melt 
+        ann%smbi = ann%smb 
+
+        ! Calculate surface temp 
+        ann%tsrf = calc_temp_surf(ann%t2m,ann%melt_net,fac=par%firn_fac)
+
+        return 
+
+    end function smbpal_update_pdd
 
     subroutine smbpal_end(smbpal)
 
@@ -455,8 +517,10 @@ contains
         ! Local parameter definitions (identical to object)
         character(len=16) :: abl_method
         real(prec)        :: Teff_sigma, sf_a, sf_b, firn_fac 
+        real(prec)        :: mm_snow, mm_ice 
 
-        namelist /smbpal_par/ abl_method, Teff_sigma, sf_a, sf_b, firn_fac
+        namelist /smbpal_par/ abl_method, Teff_sigma, sf_a, sf_b, firn_fac, &
+                        mm_snow, mm_ice 
                 
         ! Store initial values in local parameter values 
         abl_method = par%abl_method
@@ -464,6 +528,8 @@ contains
         sf_a       = par%sf_a 
         sf_b       = par%sf_b 
         firn_fac   = par%firn_fac 
+        mm_snow    = par%mm_snow 
+        mm_ice     = par%mm_ice 
 
         ! Read parameters from input namelist file
         open(7,file=trim(filename))
@@ -476,7 +542,9 @@ contains
         par%sf_a       = sf_a 
         par%sf_b       = sf_b 
         par%firn_fac   = firn_fac 
-        
+        par%mm_snow    = mm_snow 
+        par%mm_ice     = mm_ice 
+
         ! Also load itm parameters
         call itm_par_load(par%itm,filename)
 
@@ -487,53 +555,9 @@ contains
    
     ! =======================================================
     !
-    ! smb physics
+    ! smb physics (general)
     !
     ! =======================================================
-
-    elemental subroutine calc_ablation_pdd(abl,sif,pdds,acc,csnow,csi,cice)
-        ! Determine total ablation based on input pdds
-        
-        implicit none 
-
-        real(prec), intent(INOUT) :: abl, sif 
-        real(prec), intent(IN)    :: pdds, acc
-        real(prec), intent(IN)    :: csnow, csi, cice 
-
-        real(prec) :: simax
-        real(prec) :: abl_snow_pot, abl_ice_pot 
-
-        ! (* maximum amount of super. ice that can be formed *)
-        simax = acc*csi
-       
-        ! Determine the potential snowmelt (m) from the 
-        ! available pdds, then determine the potential ice melt (m)
-        ! from the left over pdds, if there are any.
-        abl_snow_pot = pdds*csnow 
-        abl_ice_pot  = max(0.0, (abl_snow_pot-acc)*cice/csnow)
-
-        ! Get the mass balance
-        if (abl_snow_pot .le. simax) then 
-            abl = 0.0 
-        else if (abl_snow_pot .gt. simax .and. abl_snow_pot .le. acc) then 
-            abl = abl_snow_pot - simax 
-        else if (abl_snow_pot .gt. acc .and. abl_ice_pot .le. simax) then 
-            abl = abl_snow_pot + (simax-abl_ice_pot)
-        else 
-            abl = abl_snow_pot + (abl_ice_pot-simax) 
-        end if  
-
-
-        ! Calculate the actual superimposed ice from refreezing 
-        if (abl_snow_pot .le. simax) then   
-            sif=pdds*csnow
-        else 
-            sif=simax 
-        endif
-
-        return 
-
-    end subroutine calc_ablation_pdd
 
     elemental function calc_temp_surf(tann,melt_net,fac) result(ts)
         ! Surface temperature is equal to the annual mean
@@ -551,73 +575,6 @@ contains
 
     end function calc_temp_surf
     
-    elemental function calc_temp_effective(temp, sigma) result(teff)
-        ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-        ! Subroutine : e f f e c t i v e T
-        ! Author     : Reinhard Calov
-        ! Purpose    : Computation of the positive degree days (PDD) with
-        !              statistical temperature fluctuations;
-        !              based on semi-analytical solution by Reinhard Calov.
-        !              This subroutine uses days as time unit, each day
-        !              is added individually
-        !              (the same sigma as for pdd monthly can be used)
-        ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-
-        ! temp = [degrees Celcius] !!! 
-
-        implicit none
-
-        real(prec), intent(IN) :: temp, sigma
-        real(prec) :: teff
-        
-        real(prec) :: temp_c, inv_sigma
-        real(prec), parameter :: inv_sqrt2   = 1.0/sqrt(2.0)
-        real(prec), parameter :: inv_sqrt2pi = 1.0/sqrt(2.0*pi)
-
-        inv_sigma   = 1.0/sigma
-
-        teff = sigma*inv_sqrt2pi*exp(-0.5*(temp*inv_sigma)**2)  &
-                  + temp*0.5*erfcc(-temp*inv_sigma*inv_sqrt2)
-
-        ! Result is the assumed/felt/effective positive degrees, 
-        ! given the actual temperature (accounting for fluctuations in day/month/etc, 
-        ! based on the sigma chosen)
-                     
-        return
-
-    end function calc_temp_effective 
-
-        
-    elemental function erfcc(x)
-        ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-        ! Function :  e r f c c
-        ! Author   :  Reinhard Calov and Ralf Greve
-        ! Purpose  :  Returns the complementary error function erfc(x) with 
-        !             fractional error everywhere less than 1.2 x 10^(-7).
-        !             Credit: Press et al., 'Numerical recipes in Fortran 77'.
-        ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-
-        implicit none
-            
-        real(prec), intent(IN) :: x
-        real(prec) :: erfcc
-
-        real(prec) :: t, z
-
-        z = abs(x)
-        t = 1.0/(1.0+0.5*z)
-
-        erfcc = t*exp(-z*z-1.26551223+t*(1.00002368+t*(0.37409196+  &
-        t*(0.09678418+t*(-0.18628806+t*(0.27886807+t*  &
-        (-1.13520398+t*(1.48851587+t*(-0.82215223+  &
-        t*0.17087277)))))))))
-
-        if (x .lt. 0.0) erfcc = 2.0-erfcc
-
-        return
-      
-    end function erfcc
-
     elemental function calc_snowfrac(t2m,a,b) result(f)
         ! Return the fraction of snow from total precipitation
         ! expected for a given temperature
@@ -632,101 +589,6 @@ contains
         return 
 
     end function calc_snowfrac 
-
-    subroutine smbpal_average(ave,now,step,nt)
-        implicit none 
-
-        type(smbpal_state_class), intent(INOUT) :: ave
-        type(smbpal_state_class), intent(IN)    :: now 
-        character(len=*)  :: step
-        real(prec), optional :: nt 
-        
-        call field_average(ave%t2m,    now%t2m,    step,nt)
-        call field_average(ave%pr,     now%pr,     step,nt)
-        call field_average(ave%sf,     now%sf,     step,nt)
-        call field_average(ave%S,      now%S,      step,nt)
-        
-        call field_average(ave%H_snow, now%H_snow, step,nt)
-        call field_average(ave%alb_s,  now%alb_s,  step,nt)
-        call field_average(ave%smbi,   now%smbi,   step,nt)
-        call field_average(ave%smb,    now%smb,    step,nt)
-        call field_average(ave%melt,   now%melt,   step,nt)
-        call field_average(ave%runoff, now%runoff, step,nt)
-        call field_average(ave%refrz,  now%refrz,  step,nt)
-        
-        call field_average(ave%melt_net,now%melt_net,step,nt)
-        
-        ! Annual values, averaged for completeness 
-        call field_average(ave%PDDs,   now%PDDs,   step,nt)
-        call field_average(ave%tsrf,   now%tsrf,   step,nt)
-        
-        return
-
-    end subroutine smbpal_average
-
-    subroutine field_average(ave,now,step,nt)
-        ! Generic routine to average a field through time 
-
-        implicit none 
-        real(prec), intent(INOUT)    :: ave(:,:)
-        real(prec), intent(IN)       :: now(:,:)
-        character(len=*), intent(IN) :: step
-        real(prec), intent(IN), optional :: nt 
-
-        if (trim(step) .eq. "init") then
-            ! Initialize field to zero  
-            ave = 0.0 
-        else if (trim(step) .eq. "step") then 
-            ! Sum intermediate steps
-            ave = ave + now 
-        else if (trim(step) .eq. "end") then
-            if (.not.  present(nt)) then 
-                write(*,*) "Averaging step total not provided."
-                stop 
-            end if 
-            ! Divide by total steps
-            ave = ave / nt 
-        else
-            write(*,*) "Step not recognized: ",trim(step)
-            stop 
-        end if 
-
-        return 
-
-    end subroutine field_average 
-
-    function idx_today(days,day) result(idx)
-
-        implicit none 
-
-        integer :: days(:), day
-        integer :: idx 
-
-        ! Determine the index of today 
-        do idx = 1, size(days)
-            if (days(idx) .ge. day) exit
-        end do 
-
-        return 
-
-    end function idx_today 
-
-     
-    elemental function var_today(x0,x1,y0,y1,x) result(y)
-        ! Interpolate y0 and y1 to y (can be fields) assuming that 
-        ! x lies within x0 and x1
-        implicit none 
-        integer, intent(IN) :: x0, x1, x
-        real(prec), intent(IN) :: y0, y1
-        real(prec) :: y 
-        real(prec) :: alpha 
-
-        alpha = dble(x - x0) / dble(x1 - x0)
-        y     = y0 + alpha*(y1-y0)
-
-        return 
-
-    end function var_today
 
     ! =======================================================
     !
@@ -855,7 +717,7 @@ contains
 
     ! =======================================================
     !
-    ! smbpal memory management
+    ! smbpal memory / data management
     !
     ! =======================================================
 
@@ -916,6 +778,100 @@ contains
         return
 
     end subroutine smbpal_deallocate
+
+    subroutine smbpal_average(ave,now,step,nt)
+        implicit none 
+
+        type(smbpal_state_class), intent(INOUT) :: ave
+        type(smbpal_state_class), intent(IN)    :: now 
+        character(len=*)  :: step
+        real(prec), optional :: nt 
+        
+        call field_average(ave%t2m,    now%t2m,    step,nt)
+        call field_average(ave%pr,     now%pr,     step,nt)
+        call field_average(ave%sf,     now%sf,     step,nt)
+        call field_average(ave%S,      now%S,      step,nt)
+        
+        call field_average(ave%H_snow, now%H_snow, step,nt)
+        call field_average(ave%alb_s,  now%alb_s,  step,nt)
+        call field_average(ave%smbi,   now%smbi,   step,nt)
+        call field_average(ave%smb,    now%smb,    step,nt)
+        call field_average(ave%melt,   now%melt,   step,nt)
+        call field_average(ave%runoff, now%runoff, step,nt)
+        call field_average(ave%refrz,  now%refrz,  step,nt)
+        
+        call field_average(ave%melt_net,now%melt_net,step,nt)
+        
+        ! Annual values, averaged for completeness 
+        call field_average(ave%PDDs,   now%PDDs,   step,nt)
+        call field_average(ave%tsrf,   now%tsrf,   step,nt)
+        
+        return
+
+    end subroutine smbpal_average
+
+    subroutine field_average(ave,now,step,nt)
+        ! Generic routine to average a field through time 
+
+        implicit none 
+        real(prec), intent(INOUT)    :: ave(:,:)
+        real(prec), intent(IN)       :: now(:,:)
+        character(len=*), intent(IN) :: step
+        real(prec), intent(IN), optional :: nt 
+
+        if (trim(step) .eq. "init") then
+            ! Initialize field to zero  
+            ave = 0.0 
+        else if (trim(step) .eq. "step") then 
+            ! Sum intermediate steps
+            ave = ave + now 
+        else if (trim(step) .eq. "end") then
+            if (.not.  present(nt)) then 
+                write(*,*) "Averaging step total not provided."
+                stop 
+            end if 
+            ! Divide by total steps
+            ave = ave / nt 
+        else
+            write(*,*) "Step not recognized: ",trim(step)
+            stop 
+        end if 
+
+        return 
+
+    end subroutine field_average 
+
+    function idx_today(days,day) result(idx)
+
+        implicit none 
+
+        integer :: days(:), day
+        integer :: idx 
+
+        ! Determine the index of today 
+        do idx = 1, size(days)
+            if (days(idx) .ge. day) exit
+        end do 
+
+        return 
+
+    end function idx_today 
+   
+    elemental function var_today(x0,x1,y0,y1,x) result(y)
+        ! Interpolate y0 and y1 to y (can be fields) assuming that 
+        ! x lies within x0 and x1
+        implicit none 
+        integer, intent(IN) :: x0, x1, x
+        real(prec), intent(IN) :: y0, y1
+        real(prec) :: y 
+        real(prec) :: alpha 
+
+        alpha = dble(x - x0) / dble(x1 - x0)
+        y     = y0 + alpha*(y1-y0)
+
+        return 
+
+    end function var_today
 
 end module smbpal
 

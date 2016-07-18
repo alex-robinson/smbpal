@@ -1,9 +1,12 @@
 &smbpal_par
-    abl_method  = "itm"   ! "itm" or "pdd"
+    abl_method  = "pdd"   ! "itm" or "pdd"
     Teff_sigma  = 5.0     ! Standard deviation of temperature [K]
     sf_a        = 0.273   ! Snow fraction function (parameter a)
     sf_b        = 273.6   ! Snow fraction function (parameter b)
     firn_fac    = 0.0 !0.0292  ! Reduction in surface temp versus melting [K/mm w.e.]
+
+    mm_snow = 3.0         ! PDD snow melt factor [mm w.e./K-d]
+    mm_ice  = 8.0         ! PDD ice melt factor  [mm w.e./K-d]
 /
 
 
@@ -20,7 +23,7 @@
 
     ! ## Surface albedo
     alb_snow_dry       =  0.8
-    alb_snow_wet       =  0.6
+    alb_snow_wet       =  0.65
     alb_ice            =  0.4
     alb_land           =  0.2
     alb_forest         =  0.1

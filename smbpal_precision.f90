@@ -16,5 +16,8 @@ module smbpal_precision
     ! Error values
     real(prec), parameter :: ERR_DIST = 1E8_dp 
     integer,  parameter   :: ERR_IND  = -1 
-    
+        
+    ! Constants
+    real(prec), parameter :: pi = 3.14159265359
+
 end module smbpal_precision 
