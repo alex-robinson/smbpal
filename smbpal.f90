@@ -45,6 +45,13 @@
         module procedure smbpal_update_daily
     end interface 
 
+    type table_teff_type
+        real(prec), allocatable :: temp(:)
+        real(prec), allocatable :: teff(:) 
+    end type 
+
+    type(table_teff_type) :: tbl_teff 
+
     private
     public :: smbpal_class
     public :: smbpal_init 
@@ -64,7 +71,8 @@ contains
 
         ! Local variables
         integer :: nx, ny, m  
-        
+        real(prec) :: tmp 
+
         nx = size(x,1)
         ny = size(y,1)
 
@@ -92,12 +100,18 @@ contains
         ! Initialize the state variables 
         smb%now%H_snow = smb%par%itm%H_snow_max 
 
+!         ! Generate lookup table for PDDs
+!         call populate_table_temp_effective(tbl_teff,delta=1.0,sigma=smb%par%Teff_sigma)
+    
+        ! Test calculation of insolation to load orbital params 
+        tmp = calc_insol_day(180,65.d0,0.d0,fldr="libs/insol/input")
+
         return 
 
     end subroutine smbpal_init
 
     subroutine smbpal_update_2temp(smb,t2m_ann,t2m_sum,pr_ann,z_srf,H_ice,time_bp,sf_ann, &
-                                   file_out,file_out_mon,file_out_day,init)
+                                   file_out,file_out_mon,file_out_day,init,calc_mon,write_now)
         ! Generate climate using two points in year (Tsum,Tann)
 
         implicit none 
@@ -110,10 +124,10 @@ contains
         character(len=*), intent(IN), optional :: file_out      ! Annual output
         character(len=*), intent(IN), optional :: file_out_mon  ! Monthly output
         character(len=*), intent(IN), optional :: file_out_day  ! Daily output 
-        logical, intent(IN), optional :: init 
+        logical, intent(IN), optional :: init, calc_mon, write_now
 
         ! Local variables
-        logical :: init_now 
+        logical :: init_now, calc_monthly, write_out_now   
         integer, parameter :: ndays = 360   ! 360-day year
         integer, parameter :: ndays_mon = 30   ! 30 days per month  
         integer :: day, m, nx, ny, mnow, mday  
@@ -126,36 +140,51 @@ contains
         init_now = .FALSE. 
         if (present(init)) init_now = init 
 
+        calc_monthly = .FALSE. 
+        if (present(calc_mon))     calc_monthly = calc_mon 
+        if (present(file_out_mon)) calc_monthly = .TRUE. 
+
+        write_out_now = .FALSE. 
+        if (present(write_now)) write_out_now = write_now 
+
         ! Fill in local versions for easier access 
         par = smb%par 
         now = smb%now 
 
         ! Initialize annual output file if needed
-        if (present(file_out_day)) then
-            call smbpal_write_init(par,file_out_day,z_srf,H_ice)
+        if (write_out_now .and. present(file_out_day)) then
+            if (init_now) call smbpal_write_init(par,file_out_day,z_srf,H_ice)
         end if 
 
         ! First calculate PDDs for the whole year (input to itm)
         PDDs = 0.0 
-        do day = 1, ndays
+        do day = 1, ndays, 10
             now%t2m = t2m_ann-(t2m_sum-t2m_ann)*cos(2.0*pi*real(day-15)/real(ndays))
-            PDDs    = PDDs + calc_temp_effective(now%t2m,par%Teff_sigma)
+            PDDs    = PDDs + calc_temp_effective(now%t2m,par%Teff_sigma)*10.0
+!             PDDs    = PDDs + lookup_temp_effective(now%t2m,par%Teff_sigma,tbl_teff)
         end do 
+
+        ! Store in teff variable for now 
+        now%teff = PDDs 
 
         ! Initialize averaging 
         call smbpal_average(smb%ann,now,step="init")
-        do m = 1, 12 
-            call smbpal_average(smb%mon(m),now,step="init")
-        end do 
+
+        if (calc_monthly) then 
+            do m = 1, 12 
+                call smbpal_average(smb%mon(m),now,step="init")
+            end do
+        end if 
 
         mnow = 1 
-        mday = 1 
+        mday = 0 
 
         do day = 1, ndays
 
             ! Determine t2m, teff, pr, sf and S today 
-            now%t2m  = t2m_ann-(t2m_sum-t2m_ann)*cos(2.0*pi*real(day-15)/real(ndays))
-            now%teff = calc_temp_effective(now%t2m,par%Teff_sigma)
+            now%t2m  = t2m_ann-(t2m_sum-t2m_ann)*cos(2.0*pi*real(day-15)/real(ndays)) 
+!             now%teff = calc_temp_effective(now%t2m,par%Teff_sigma)
+!             now%teff = lookup_temp_effective(now%t2m,par%Teff_sigma,tbl_teff)
             now%pr = pr_ann
 
             if (present(sf_ann)) then 
@@ -174,16 +203,19 @@ contains
 
             ! Get averages 
             call smbpal_average(smb%ann,now,step="step")
-            call smbpal_average(smb%mon(mnow),now,step="step")
 
-            mday = mday + 1 
-            if (mday .eq. ndays_mon) then 
-                call smbpal_average(smb%mon(mnow),now,step="end",nt=real(ndays_mon))
-                mnow = mnow + 1
-                mday = 1 
+            if (calc_monthly) then 
+                call smbpal_average(smb%mon(mnow),now,step="step")
+
+                mday = mday + 1 
+                if (mday .eq. ndays_mon) then 
+                    call smbpal_average(smb%mon(mnow),now,step="end",nt=real(ndays_mon))
+                    mnow = mnow + 1
+                    mday = 0 
+                end if 
             end if 
 
-            if (present(file_out_day)) then 
+            if (write_out_now .and. present(file_out_day)) then 
                 ! Write daily output for this year 
                 call smbpal_write(now,file_out,time_bp=time_bp,step="day",nstep=day)
             end if 
@@ -197,15 +229,15 @@ contains
         smb%now = now 
 
         ! Annual I/O 
-        if (present(file_out)) then
+        if (write_out_now .and. present(file_out)) then
             if (init_now) call smbpal_write_init(par,file_out,z_srf,H_ice)
             call smbpal_write(smb%ann,file_out,time_bp=time_bp,step="ann")
 
         end if 
 
         ! Monthly I/O 
-        if (present(file_out_mon)) then
-            call smbpal_write_init(par,file_out_mon,z_srf,H_ice)
+        if (write_out_now .and. calc_monthly .and. present(file_out_mon)) then
+            if (init_now) call smbpal_write_init(par,file_out_mon,z_srf,H_ice)
             do m = 1, 12
                 call smbpal_write(smb%mon(m),file_out_mon,time_bp=time_bp,step="mon",nstep=m)
             end do 
@@ -372,17 +404,84 @@ contains
 
     end function calc_temp_surf
     
-    ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    ! Subroutine : e f f e c t i v e T
-    ! Author     : Reinhard Calov
-    ! Purpose    : Computation of the positive degree days (PDD) with
-    !              statistical temperature fluctuations;
-    !              based on semi-analytical solution by Reinhard Calov.
-    !              This subroutine uses days as time unit, each day
-    !              is added individually
-    !              (the same sigma as for pdd monthly can be used)
-    ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    elemental function lookup_temp_effective(temp, sigma, tbl) result(teff)
+        ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        ! Subroutine : e f f e c t i v e T
+        ! Author     : Reinhard Calov
+        ! Purpose    : Computation of the positive degree days (PDD) with
+        !              statistical temperature fluctuations;
+        !              based on semi-analytical solution by Reinhard Calov.
+        !              This subroutine uses days as time unit, each day
+        !              is added individually
+        !              (the same sigma as for pdd monthly can be used)
+        ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        
+        implicit none
+
+        real(prec), intent(IN) :: temp, sigma
+        type(table_teff_type), intent(IN) :: tbl 
+        real(prec) :: teff
+        
+        real(prec) :: temp_c
+        integer :: i 
+
+        temp_c = temp 
+        if (temp .gt. 150.0) temp_c = temp-273.15 
+
+        do i = 1, size(tbl%temp)
+            if (tbl%temp(i) .gt. temp_c) exit 
+        end do 
+
+        if (i .eq. 1) then 
+            teff = tbl%teff(i) 
+        else
+            teff = (tbl%teff(i)-tbl%teff(i-1)) * (temp-tbl%temp(i))/(tbl%temp(i)-tbl%temp(i-1))
+        end if 
+
+!         i = minloc(abs(temp_c-tbl%temp),1)
+!         teff = tbl%teff(i)
+          
+        return
+
+    end function lookup_temp_effective 
+
+    subroutine populate_table_temp_effective(tbl,delta,sigma)
+
+        implicit none 
+
+        type(table_teff_type), intent(OUT) :: tbl 
+        real(prec), intent(IN) :: delta
+        real(prec), intent(IN) :: sigma  
+        integer :: i, nt  
+        real(prec), parameter :: temp_min = -20.0   ! [C]
+        real(prec), parameter :: temp_max =  30.0   ! [C]
+        
+        if (allocated(tbl%temp))  deallocate(tbl%temp)
+        if (allocated(tbl%teff))  deallocate(tbl%teff)
+
+        nt = ceiling( (temp_max-temp_min) / delta + 1)
+        allocate(tbl%temp(nt),tbl%teff(nt))
+
+        do i = 1, nt 
+            tbl%temp(i) = temp_min + (i-1)*delta
+            tbl%teff(i) = calc_temp_effective(tbl%temp(i), sigma)
+        end do 
+
+        return 
+
+    end subroutine populate_table_temp_effective
+
     elemental function calc_temp_effective(temp, sigma) result(teff)
+        ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        ! Subroutine : e f f e c t i v e T
+        ! Author     : Reinhard Calov
+        ! Purpose    : Computation of the positive degree days (PDD) with
+        !              statistical temperature fluctuations;
+        !              based on semi-analytical solution by Reinhard Calov.
+        !              This subroutine uses days as time unit, each day
+        !              is added individually
+        !              (the same sigma as for pdd monthly can be used)
+        ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
         implicit none
 
@@ -409,14 +508,15 @@ contains
 
     end function calc_temp_effective 
 
-    ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    ! Function :  e r f c c
-    ! Author   :  Reinhard Calov and Ralf Greve
-    ! Purpose  :  Returns the complementary error function erfc(x) with 
-    !             fractional error everywhere less than 1.2 x 10^(-7).
-    !             Credit: Press et al., 'Numerical recipes in Fortran 77'.
-    ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        
     elemental function erfcc(x)
+        ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        ! Function :  e r f c c
+        ! Author   :  Reinhard Calov and Ralf Greve
+        ! Purpose  :  Returns the complementary error function erfc(x) with 
+        !             fractional error everywhere less than 1.2 x 10^(-7).
+        !             Credit: Press et al., 'Numerical recipes in Fortran 77'.
+        ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
         implicit none
             
