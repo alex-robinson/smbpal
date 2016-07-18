@@ -2,6 +2,7 @@
 
     use smbpal_precision
     use insolation
+    use interp_time 
     use ncio
     use smb_itm 
 
@@ -9,6 +10,9 @@
 
     real(prec), parameter :: pi = 3.14159265359
 
+    integer, parameter :: ndays = 360   ! 360-day year
+    integer, parameter :: ndays_mon = 30   ! 30 days per month  
+        
     type smbpal_param_class
         type(itm_par_class) :: itm
         character(len=16)   :: abl_method 
@@ -120,8 +124,6 @@ contains
 
         ! Local variables
         logical :: init_now, calc_monthly, write_out_now   
-        integer, parameter :: ndays = 360   ! 360-day year
-        integer, parameter :: ndays_mon = 30   ! 30 days per month  
         integer :: day, m, nx, ny, mnow, mday  
 
         type(smbpal_param_class) :: par
@@ -236,45 +238,200 @@ contains
 
     end subroutine smbpal_update_2temp
 
-    subroutine smbpal_update_monthly(par,now,t2m,pr,time_bp)
+    subroutine smbpal_update_monthly(smb,t2m,pr,z_srf,H_ice,time_bp,sf, &
+                        file_out,file_out_mon,file_out_day,write_init,calc_mon,write_now)
         ! Generate climate using monthly input data [nx,ny,nmon]
         
         implicit none 
         
-        type(smbpal_param_class), intent(IN)    :: par
-        type(smbpal_state_class), intent(INOUT) :: now
+        type(smbpal_class), intent(INOUT) :: smb
         real(prec), intent(IN) :: t2m(:,:,:), pr(:,:,:)
+        real(prec), intent(IN) ::  z_srf(:,:), H_ice(:,:)
         real(prec), intent(IN) :: time_bp       ! years BP 
+        real(prec),       intent(IN), optional :: sf(:,:,:)
+        character(len=*), intent(IN), optional :: file_out      ! Annual output
+        character(len=*), intent(IN), optional :: file_out_mon  ! Monthly output
+        character(len=*), intent(IN), optional :: file_out_day  ! Daily output 
+        logical, intent(IN), optional :: write_init, calc_mon, write_now
 
         ! Local variables
-        real(prec), allocatable :: t2m_now(:,:), pr_now(:,:)
+        integer :: ndays_daily, k   
+        integer, allocatable :: daily(:)
+        real(prec), allocatable :: t2m_daily(:,:,:), pr_daily(:,:,:)
+        real(prec), allocatable :: sf_daily(:,:,:)
+        double precision, allocatable :: tmp(:,:,:)
+        
+        ndays_daily = 37
+        allocate(daily(ndays_daily))
+        allocate(t2m_daily(size(t2m,1),size(t2m,2),ndays_daily))
+        allocate(pr_daily(size(t2m,1),size(t2m,2),ndays_daily))
+        allocate(sf_daily(size(t2m,1),size(t2m,2),ndays_daily))
+        allocate(tmp(size(t2m,1),size(t2m,2),ndays_daily))
+        
+        ! Define daily days
+        do k = 1, ndays_daily-1 
+            daily(k) = 1 + (k-1)*(ndays / (ndays_daily-1))
+        end do 
+        daily(ndays_daily) = ndays 
 
-        allocate(t2m_now(size(t2m,1),size(t2m,2)))
-        allocate(pr_now(size(pr,1),size(pr,2)))
 
+        ! Generate daily climate from monthly input 
+        call convert_monthly_daily_3D(dble(t2m),tmp,days=daily)
+        t2m_daily = tmp 
+        call convert_monthly_daily_3D(dble(pr),tmp,days=daily)
+        pr_daily = tmp 
+        call convert_monthly_daily_3D(dble(sf),tmp,days=daily)
+        sf_daily = tmp 
+        where(sf_daily .lt. 0.0) sf_daily = 0.0 
 
+!         write(*,*) "t2m_daily: ", minval(t2m_daily), maxval(t2m_daily)
+!         write(*,*) "pr_daily: ",  minval(pr_daily),  maxval(pr_daily)
+!         write(*,*) "sf_daily: ",  minval(sf_daily),  maxval(sf_daily)
+!         stop 
+
+        ! Call daily subroutine 
+        call smbpal_update_daily(smb,daily,t2m_daily,pr_daily,sf_daily, &
+                                 z_srf,H_ice,time_bp, &
+                                 file_out,file_out_mon,file_out_day, &
+                                 write_init,calc_mon,write_now)
+        
         return 
 
     end subroutine smbpal_update_monthly
 
 
 
-    subroutine smbpal_update_daily(par,now,t2m,pr,time_bp)
-        ! Generate climate using input data for each day
+    subroutine smbpal_update_daily(smb,days,t2m,pr,sf,z_srf,H_ice,time_bp, &
+                                   file_out,file_out_mon,file_out_day,write_init,calc_mon,write_now)
+        ! Generate smb using daily input of climate [nx,ny,nday]
 
         implicit none 
         
-        type(smbpal_param_class), intent(IN)    :: par
-        type(smbpal_state_class), intent(INOUT) :: now
-        real(prec), intent(IN) :: t2m(:,:), pr(:,:)
-        real(prec), intent(IN) :: time_bp       ! years BP  
+        type(smbpal_class), intent(INOUT) :: smb
+        integer, intent(IN) :: days(:)
+        real(prec), intent(IN) :: t2m(:,:,:), pr(:,:,:), sf(:,:,:)
+        real(prec), intent(IN) ::  z_srf(:,:), H_ice(:,:)
+        real(prec), intent(IN) :: time_bp       ! years BP 
+        character(len=*), intent(IN), optional :: file_out      ! Annual output
+        character(len=*), intent(IN), optional :: file_out_mon  ! Monthly output
+        character(len=*), intent(IN), optional :: file_out_day  ! Daily output 
+        logical, intent(IN), optional :: write_init, calc_mon, write_now
 
-        ! ** TO DO ** 
+        ! Local variables
+        logical :: init_now, calc_monthly, write_out_now   
+        integer, parameter :: ndays = 360   ! 360-day year
+        integer, parameter :: ndays_mon = 30   ! 30 days per month  
+        integer :: day, m, nx, ny, mnow, mday  
+        integer :: k1 
+
+        type(smbpal_param_class) :: par
+        type(smbpal_state_class) :: now
+
+        ! Determine whether this is first time running (for output)
+        init_now = .FALSE. 
+        if (present(write_init)) init_now = write_init 
+
+        calc_monthly = .FALSE. 
+        if (present(calc_mon))     calc_monthly = calc_mon 
+        if (present(file_out_mon)) calc_monthly = .TRUE. 
+
+        write_out_now = .FALSE. 
+        if (present(write_now)) write_out_now = write_now 
+
+        ! Fill in local versions for easier access 
+        par = smb%par 
+        now = smb%now 
+
+        ! Initialize annual output file if needed
+        if (write_out_now .and. present(file_out_day)) then
+            if (init_now) call smbpal_write_init(par,file_out_day,z_srf,H_ice)
+        end if 
+
+        ! First calculate PDDs for the whole year (input to itm)
+        now%PDDs = 0.0 
+        do day = 1, ndays, 10
+            k1 = idx_today(days,day)
+            now%t2m = var_today(days(k1-1),days(k1),t2m(:,:,k1-1),t2m(:,:,k1),day)
+            now%PDDs = now%PDDs + calc_temp_effective(now%t2m-273.15,par%Teff_sigma)*10.0
+        end do 
+
+        ! Initialize averaging 
+        call smbpal_average(smb%ann,now,step="init")
+
+        if (calc_monthly) then 
+            do m = 1, 12 
+                call smbpal_average(smb%mon(m),now,step="init")
+            end do
+        end if 
+
+        mnow = 1 
+        mday = 0 
+
+        do day = 1, ndays
+
+            ! Determine t2m, pr, sf and S today 
+            k1 = idx_today(days,day)
+            now%t2m = var_today(days(k1-1),days(k1),t2m(:,:,k1-1),t2m(:,:,k1),day)
+            now%pr  = var_today(days(k1-1),days(k1),pr(:,:,k1-1), pr(:,:,k1),day)
+            now%sf  = var_today(days(k1-1),days(k1),sf(:,:,k1-1), sf(:,:,k1),day)
+            
+            now%S = calc_insol_day(day,dble(par%lats),dble(time_bp),fldr="libs/insol/input")
+
+            ! Call mass budget for today
+            call calc_snowpack_budget_day(par%itm,z_srf,H_ice,now%S,now%t2m,now%PDDs, &
+                                          now%pr,now%sf,now%H_snow,now%alb_s,now%smbi, &
+                                          now%smb,now%melt,now%runoff,now%refrz,now%melt_net)
         
+
+            ! Get averages 
+            call smbpal_average(smb%ann,now,step="step")
+
+            if (calc_monthly) then 
+                call smbpal_average(smb%mon(mnow),now,step="step")
+
+                mday = mday + 1 
+                if (mday .eq. ndays_mon) then 
+                    call smbpal_average(smb%mon(mnow),now,step="end",nt=real(ndays_mon))
+                    mnow = mnow + 1
+                    mday = 0 
+                end if 
+            end if 
+
+            if (write_out_now .and. present(file_out_day)) then 
+                ! Write daily output for this year 
+                call smbpal_write(now,file_out,time_bp=time_bp,step="day",nstep=day)
+            end if 
+    
+        end do 
+
+        ! Finalize annual average 
+        call smbpal_average(smb%ann,now,step="end",nt=real(ndays))
+
+        ! Calculate surface temp 
+        smb%ann%tsrf = calc_temp_surf(smb%ann%t2m,smb%ann%melt_net*ndays,fac=par%firn_fac)
+
+        ! Repopulate global now variable (in case it is needed)
+        smb%now = now 
+
+        ! Annual I/O 
+        if (write_out_now .and. present(file_out)) then
+            if (init_now) call smbpal_write_init(par,file_out,z_srf,H_ice)
+            call smbpal_write(smb%ann,file_out,time_bp=time_bp,step="ann")
+
+        end if 
+
+        ! Monthly I/O 
+        if (write_out_now .and. calc_monthly .and. present(file_out_mon)) then
+            if (init_now) call smbpal_write_init(par,file_out_mon,z_srf,H_ice)
+            do m = 1, 12
+                call smbpal_write(smb%mon(m),file_out_mon,time_bp=time_bp,step="mon",nstep=m)
+            end do 
+
+        end if 
+
         return 
 
     end subroutine smbpal_update_daily
-
 
     subroutine smbpal_end(smbpal)
 
@@ -537,6 +694,39 @@ contains
         return 
 
     end subroutine field_average 
+
+    function idx_today(days,day) result(idx)
+
+        implicit none 
+
+        integer :: days(:), day
+        integer :: idx 
+
+        ! Determine the index of today 
+        do idx = 1, size(days)
+            if (days(idx) .ge. day) exit
+        end do 
+
+        return 
+
+    end function idx_today 
+
+     
+    elemental function var_today(x0,x1,y0,y1,x) result(y)
+        ! Interpolate y0 and y1 to y (can be fields) assuming that 
+        ! x lies within x0 and x1
+        implicit none 
+        integer, intent(IN) :: x0, x1, x
+        real(prec), intent(IN) :: y0, y1
+        real(prec) :: y 
+        real(prec) :: alpha 
+
+        alpha = dble(x - x0) / dble(x1 - x0)
+        y     = y0 + alpha*(y1-y0)
+
+        return 
+
+    end function var_today
 
     ! =======================================================
     !

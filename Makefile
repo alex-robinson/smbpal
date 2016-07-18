@@ -111,6 +111,9 @@ $(objdir)/ncio.o: $(libdir)/ncio.f90
 $(objdir)/interp1D.o: $(libdir)/insol/interp1D.f90
 	$(FC) $(DFLAGS) $(FLAGS) -c -o $@ $<
 
+$(objdir)/interp_time.o: $(libdir)/coordinates/interp_time.f90
+	$(FC) $(DFLAGS) $(FLAGS) -c -o $@ $<
+
 $(objdir)/insolation.o: $(libdir)/insol/insolation.f90
 	$(FC) $(DFLAGS) $(FLAGS) -c -o $@ $<
 
@@ -120,12 +123,14 @@ $(objdir)/smbpal_precision.o: $(srcdir)/smbpal_precision.f90
 $(objdir)/smb_itm.o: $(srcdir)/smb_itm.f90 $(objdir)/smbpal_precision.o
 	$(FC) $(DFLAGS) $(FLAGS) -c -o $@ $<
 
-$(objdir)/smbpal.o: $(srcdir)/smbpal.f90 $(objdir)/smbpal_precision.o $(objdir)/nml.o $(objdir)/insolation.o $(objdir)/ncio.o
+$(objdir)/smbpal.o: $(srcdir)/smbpal.f90 $(objdir)/smbpal_precision.o $(objdir)/nml.o $(objdir)/insolation.o  \
+					$(objdir)/interp1D.o $(objdir)/interp_time.o $(objdir)/ncio.o
 	$(FC) $(DFLAGS) $(FLAGS) -c -o $@ $<
 
 # Group the object files together
 obj_smbpal =     $(objdir)/insolation.o \
 				 $(objdir)/interp1D.o \
+				 $(objdir)/interp_time.o \
 				 $(objdir)/nml.o \
 				 $(objdir)/ncio.o \
 				 $(objdir)/smb_itm.o \
