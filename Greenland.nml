@@ -1,5 +1,5 @@
 &smbpal_par
-    abl_method  = "pdd"   ! "itm" or "pdd"
+    abl_method  = "itm"   ! "itm" or "pdd"
     Teff_sigma  = 5.0     ! Standard deviation of temperature [K]
     sf_a        = 0.273   ! Snow fraction function (parameter a)
     sf_b        = 273.6   ! Snow fraction function (parameter b)

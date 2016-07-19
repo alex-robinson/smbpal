@@ -20,7 +20,7 @@ program test
     integer :: k 
 
     ! Output file 
-    file_out = "output/smbpal_eraint_pdd.nc"
+    file_out = "output/smbpal_eraint_itm.nc"
 
     ! Load domain test data (Greenland)
     file_topo = "data/GRL-20KM_TOPO-B13_gl0.05.nc"

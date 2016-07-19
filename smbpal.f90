@@ -308,10 +308,6 @@ contains
             pr_ann  = sum(pr,dim=3)  / 12.0 
             sf_ann  = sum(sf,dim=3)  / 12.0 
             
-            write(*,*) "t2m_ann: ", minval(t2m_ann), maxval(t2m_ann)
-            write(*,*) "pr_ann: ",  minval(pr_ann),  maxval(pr_ann)
-            write(*,*) "sf_ann: ",  minval(sf_ann),  maxval(sf_ann)
-            
             ! First calculate PDDs for the whole year (input to pdd)
             smb%now%PDDs = 0.0 
             do k = 1, 12
@@ -319,8 +315,6 @@ contains
                 smb%now%PDDs = smb%now%PDDs + calc_temp_effective(smb%now%t2m-273.15,smb%par%Teff_sigma)*30.0
             end do 
 
-            write(*,*) "PDDs: ",  minval(smb%now%PDDs),  maxval(smb%now%PDDs)
-            
             smb%ann = smbpal_update_pdd(smb%par,smb%now,z_srf,H_ice, &
                                         t2m_ann,pr_ann,sf_ann)
         end if 
