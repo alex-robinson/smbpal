@@ -96,7 +96,7 @@ contains
     end subroutine itm_par_load
 
    
-    elemental subroutine calc_snowpack_budget_day(par,z_srf,H_ice,S,t2m,PDDs,pr,sf, &
+    elemental subroutine calc_snowpack_budget_day(par,dt,z_srf,H_ice,S,t2m,PDDs,pr,sf, &
                                            H_snow,alb_s,smbi,smb,melt,runoff,refrz,melt_net)
     ! Determine the total melt, accumulation and surface mass balance at a given point
     !  * Modified from rembo subroutine `melt_budget`
@@ -108,6 +108,7 @@ contains
     implicit none
 
     type(itm_par_class), intent(IN)    :: par 
+    real(prec),    intent(IN)    :: dt         ! Timestep [days], dt >= 1
     real(prec),    intent(IN)    :: z_srf, H_ice, S, t2m, PDDs, pr, sf 
     real(prec),    intent(INOUT) :: H_snow  
     real(prec),    intent(OUT)   :: alb_s, smbi, smb, melt, runoff, refrz
@@ -126,24 +127,24 @@ contains
     alb_s = calc_albedo_surface(par,z_srf,H_ice,H_snow,PDDs)
 
     ! Add additional snowfall 
-    H_snow  = H_snow + sf
+    H_snow  = H_snow + sf*dt
 
     ! Get amount of potential melt from ITM scheme
     atrans   = calc_atmos_transmissivity(z_srf,par%trans_a,par%trans_b)
     melt_pot = calc_itm(S,t2m-273.15,alb_s,atrans,par%itm_c,par%itm_t)
 
     ! Determine how much snow and ice would be melted today
-    if (melt_pot .gt. H_snow) then 
+    if (melt_pot*dt .gt. H_snow) then 
       
       ! All snow is melted, the rest of energy converted to melt some ice
       ! The rest of energy will go into melting ice
-      melted_snow = H_snow
-      melted_ice  = melt_pot - H_snow
+      melted_snow = H_snow 
+      melted_ice  = melt_pot*dt - H_snow
 
     else
       
       ! Snow melt will use all energy, none left for ice melt
-      melted_snow = melt_pot
+      melted_snow = melt_pot*dt
       melted_ice  = 0.d0
       
     end if    
@@ -155,7 +156,7 @@ contains
     H_snow = H_snow - melted_snow
 
     ! Adjust the albedo (accounting for actual amount of melt)
-    alb_s = calc_albedo_surface(par,z_srf,H_ice,H_snow,PDDs,melt=melt)
+    alb_s = calc_albedo_surface(par,z_srf,H_ice,H_snow,PDDs,melt=melt/dt)
 
     ! Determine how much new ice is made from compression of remaining snow
     snow_to_ice = 0.d0
@@ -184,7 +185,7 @@ contains
     end if
 
     ! Determine the actual maximum amount of refreezing (limited to snowpack thickness)
-    refrz_rain     = min(rf*rfac,H_snow)                      ! First rain takes up refreezing capacity
+    refrz_rain     = min(rf*dt*rfac,H_snow)                   ! First rain takes up refreezing capacity
     refrz_snow     = min(melted_snow*rfac,H_snow-refrz_rain)  ! Melted_snow uses remaining capacity if it needs it
     refrz          = refrz_snow + refrz_rain                  ! Total refreezing
 
@@ -192,7 +193,7 @@ contains
     runoff      = (melted_snow-refrz_snow) + (rf-refrz_rain) + melted_ice
 
     ! Get the global surface mass balance
-    smb = sf + rf - runoff
+    smb = (sf + rf)*dt - runoff
 
     ! Get the internal surface mass balance (what ice sheet model needs)
     ! These should apply at separate places, so
@@ -206,6 +207,14 @@ contains
     else 
         melt_net = refrz - melted_snow    ! refrz is zero here, but keep it for consistency
     end if 
+
+    ! Convert back to daily rates 
+    melt     = melt/dt 
+    melt_net = melt_net/dt 
+    runoff   = runoff/dt 
+    refrz    = refrz/dt 
+    smb      = smb/dt
+    smbi     = smbi/dt 
 
     return
 

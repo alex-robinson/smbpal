@@ -124,6 +124,7 @@ contains
         ! Local variables
         logical :: init_now, calc_monthly, write_out_now   
         integer :: day, m, nx, ny, mnow, mday  
+        real(prec) :: dt 
 
         type(smbpal_param_class) :: par
         type(smbpal_state_class) :: now
@@ -167,6 +168,8 @@ contains
         mnow = 1 
         mday = 0 
 
+        dt = 1.0 
+
         do day = 1, ndays
 
             ! Determine t2m, pr, sf and S today 
@@ -182,7 +185,7 @@ contains
             now%S = calc_insol_day(day,dble(par%lats),dble(time_bp),fldr="libs/insol/input")
 
             ! Call mass budget for today
-            call calc_snowpack_budget_day(par%itm,z_srf,H_ice,now%S,now%t2m,now%PDDs, &
+            call calc_snowpack_budget_day(par%itm,dt,z_srf,H_ice,now%S,now%t2m,now%PDDs, &
                                           now%pr,now%sf,now%H_snow,now%alb_s,now%smbi, &
                                           now%smb,now%melt,now%runoff,now%refrz,now%melt_net)
         
@@ -351,6 +354,7 @@ contains
         integer, parameter :: ndays_mon = 30   ! 30 days per month  
         integer :: day, m, nx, ny, mnow, mday  
         integer :: k1 
+        real(prec) :: dt    ! [days]
 
         type(smbpal_param_class) :: par
         type(smbpal_state_class) :: now
@@ -395,7 +399,9 @@ contains
             if (init_now) call smbpal_write_init(par,file_out_day,z_srf,H_ice)
         end if 
 
-        do day = 1, ndays
+        dt = 2.0 
+
+        do day = 1, ndays, int(dt)
 
             ! Determine t2m, pr, sf and S today 
             k1 = idx_today(days,day)
@@ -406,7 +412,7 @@ contains
             now%S = calc_insol_day(day,dble(par%lats),dble(time_bp),fldr="libs/insol/input")
 
             ! Call mass budget for today
-            call calc_snowpack_budget_day(par%itm,z_srf,H_ice,now%S,now%t2m,now%PDDs, &
+            call calc_snowpack_budget_day(par%itm,dt,z_srf,H_ice,now%S,now%t2m,now%PDDs, &
                                           now%pr,now%sf,now%H_snow,now%alb_s,now%smbi, &
                                           now%smb,now%melt,now%runoff,now%refrz,now%melt_net)
         
@@ -419,7 +425,7 @@ contains
 
                 mday = mday + 1 
                 if (mday .eq. ndays_mon) then 
-                    call smbpal_average(smb%mon(mnow),now,step="end",nt=real(ndays_mon))
+                    call smbpal_average(smb%mon(mnow),now,step="end",nt=real(ndays_mon)/dt)
                     mnow = mnow + 1
                     mday = 0 
                 end if 
@@ -433,7 +439,7 @@ contains
         end do 
 
         ! Finalize annual average 
-        call smbpal_average(smb%ann,now,step="end",nt=real(ndays))
+        call smbpal_average(smb%ann,now,step="end",nt=real(ndays)/dt)
 
         ! Calculate surface temp 
         smb%ann%tsrf = calc_temp_surf(smb%ann%t2m,smb%ann%melt_net*ndays,fac=par%firn_fac)

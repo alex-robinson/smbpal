@@ -18,7 +18,7 @@
     ! ## ITM 
     trans_a         =  0.46 
     trans_b         =  6e-5
-    itm_c           = -55.0
+    itm_c           = -50.0
     itm_t           =  10.0
 
     ! ## Surface albedo
