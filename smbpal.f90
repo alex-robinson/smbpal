@@ -14,6 +14,8 @@
         
     type smbpal_param_class
         type(itm_par_class) :: itm
+        logical    :: const_insol
+        real(prec) :: const_kabp
         character(len=512)  :: insol_fldr 
         character(len=16)   :: abl_method 
         real(prec) :: Teff_sigma, sf_a, sf_b, firn_fac  
@@ -268,7 +270,8 @@ contains
         integer :: day, m, nx, ny, mnow, mday  
         integer :: k1 
         real(prec) :: dt    ! [days]
-
+        real(8) :: insol_time
+        
         type(smbpal_param_class) :: par
         type(smbpal_state_class) :: now
 
@@ -282,7 +285,11 @@ contains
 
         write_out_now = .FALSE. 
         if (present(write_now)) write_out_now = write_now 
-
+        
+        ! Determine year to use for insolation calcs
+        insol_time = time_bp
+        if (smb%par%const_insol) insol_time = smb%par%const_kabp*1e3
+        
         ! Fill in local versions for easier access 
         par = smb%par 
         now = smb%now 
@@ -322,7 +329,7 @@ contains
             now%pr  = var_today(days(k1-1),days(k1),pr(:,:,k1-1), pr(:,:,k1),day)
             now%sf  = var_today(days(k1-1),days(k1),sf(:,:,k1-1), sf(:,:,k1),day)
             
-            now%S = calc_insol_day(day,dble(par%lats),dble(time_bp),fldr=par%insol_fldr)
+            now%S = calc_insol_day(day,dble(par%lats),insol_time,fldr=par%insol_fldr)
 
             ! Call mass budget for today
             call calc_snowpack_budget_day(par%itm,dt,z_srf,H_ice,now%S,now%t2m,now%PDDs, &
@@ -432,22 +439,26 @@ contains
 
         ! Local parameter definitions (identical to object)
         character(len=512) :: insol_fldr 
+        logical    :: const_insol
+        real(prec) :: const_kabp
         character(len=16)  :: abl_method
         real(prec)         :: Teff_sigma, sf_a, sf_b, firn_fac 
         real(prec)         :: mm_snow, mm_ice 
 
-        namelist /smbpal_par/ insol_fldr, abl_method, Teff_sigma, sf_a, sf_b, firn_fac, &
-                        mm_snow, mm_ice 
+        namelist /smbpal_par/ insol_fldr, const_insol, const_kabp, &
+            abl_method, Teff_sigma, sf_a, sf_b, firn_fac, mm_snow, mm_ice 
                 
         ! Store initial values in local parameter values 
-        insol_fldr = par%insol_fldr
-        abl_method = par%abl_method
-        Teff_sigma = par%Teff_sigma 
-        sf_a       = par%sf_a 
-        sf_b       = par%sf_b 
-        firn_fac   = par%firn_fac 
-        mm_snow    = par%mm_snow 
-        mm_ice     = par%mm_ice 
+        insol_fldr  = par%insol_fldr
+        const_insol = par%const_insol
+        const_kabp  = par%const_kabp
+        abl_method  = par%abl_method
+        Teff_sigma  = par%Teff_sigma 
+        sf_a        = par%sf_a 
+        sf_b        = par%sf_b 
+        firn_fac    = par%firn_fac 
+        mm_snow     = par%mm_snow 
+        mm_ice      = par%mm_ice 
 
         ! Read parameters from input namelist file
         inquire(file=trim(filename),NUMBER=file_unit)
@@ -460,14 +471,16 @@ contains
         end if 
 
         ! Store local parameter values in output object
-        par%insol_fldr = insol_fldr 
-        par%abl_method = abl_method
-        par%Teff_sigma = Teff_sigma 
-        par%sf_a       = sf_a 
-        par%sf_b       = sf_b 
-        par%firn_fac   = firn_fac 
-        par%mm_snow    = mm_snow 
-        par%mm_ice     = mm_ice 
+        par%insol_fldr  = insol_fldr 
+        par%const_insol = const_insol
+        par%const_kabp  = const_kabp
+        par%abl_method  = abl_method
+        par%Teff_sigma  = Teff_sigma 
+        par%sf_a        = sf_a 
+        par%sf_b        = sf_b 
+        par%firn_fac    = firn_fac 
+        par%mm_snow     = mm_snow 
+        par%mm_ice      = mm_ice 
 
         ! Also load itm parameters
         call itm_par_load(par%itm,filename)
