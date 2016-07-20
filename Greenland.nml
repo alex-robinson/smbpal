@@ -1,4 +1,5 @@
 &smbpal_par
+    insol_fldr  = "libs/insol/input"
     abl_method  = "itm"   ! "itm" or "pdd"
     Teff_sigma  = 5.0     ! Standard deviation of temperature [K]
     sf_a        = 0.273   ! Snow fraction function (parameter a)
@@ -18,7 +19,7 @@
     ! ## ITM 
     trans_a         =  0.46 
     trans_b         =  6e-5
-    itm_c           = -50.0
+    itm_c           = -55.0
     itm_t           =  10.0
 
     ! ## Surface albedo

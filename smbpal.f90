@@ -14,6 +14,7 @@
         
     type smbpal_param_class
         type(itm_par_class) :: itm
+        character(len=512)  :: insol_fldr 
         character(len=16)   :: abl_method 
         real(prec) :: Teff_sigma, sf_a, sf_b, firn_fac  
         real(prec) :: mm_snow, mm_ice 
@@ -321,7 +322,7 @@ contains
             now%pr  = var_today(days(k1-1),days(k1),pr(:,:,k1-1), pr(:,:,k1),day)
             now%sf  = var_today(days(k1-1),days(k1),sf(:,:,k1-1), sf(:,:,k1),day)
             
-            now%S = calc_insol_day(day,dble(par%lats),dble(time_bp),fldr="libs/insol/input")
+            now%S = calc_insol_day(day,dble(par%lats),dble(time_bp),fldr=par%insol_fldr)
 
             ! Call mass budget for today
             call calc_snowpack_budget_day(par%itm,dt,z_srf,H_ice,now%S,now%t2m,now%PDDs, &
@@ -426,15 +427,20 @@ contains
         type(smbpal_param_class)     :: par
         character(len=*), intent(IN) :: filename 
 
-        ! Local parameter definitions (identical to object)
-        character(len=16) :: abl_method
-        real(prec)        :: Teff_sigma, sf_a, sf_b, firn_fac 
-        real(prec)        :: mm_snow, mm_ice 
+        ! Local variables 
+        integer :: file_unit 
 
-        namelist /smbpal_par/ abl_method, Teff_sigma, sf_a, sf_b, firn_fac, &
+        ! Local parameter definitions (identical to object)
+        character(len=512) :: insol_fldr 
+        character(len=16)  :: abl_method
+        real(prec)         :: Teff_sigma, sf_a, sf_b, firn_fac 
+        real(prec)         :: mm_snow, mm_ice 
+
+        namelist /smbpal_par/ insol_fldr, abl_method, Teff_sigma, sf_a, sf_b, firn_fac, &
                         mm_snow, mm_ice 
                 
         ! Store initial values in local parameter values 
+        insol_fldr = par%insol_fldr
         abl_method = par%abl_method
         Teff_sigma = par%Teff_sigma 
         sf_a       = par%sf_a 
@@ -444,11 +450,17 @@ contains
         mm_ice     = par%mm_ice 
 
         ! Read parameters from input namelist file
-        open(7,file=trim(filename))
-        read(7,nml=smbpal_par)
-        close(7)
+        inquire(file=trim(filename),NUMBER=file_unit)
+        if (file_unit .gt. 0) then 
+            read(file_unit,nml=smbpal_par)
+        else
+            open(7,file=trim(filename))
+            read(7,nml=smbpal_par)
+            close(7)
+        end if 
 
         ! Store local parameter values in output object
+        par%insol_fldr = insol_fldr 
         par%abl_method = abl_method
         par%Teff_sigma = Teff_sigma 
         par%sf_a       = sf_a 

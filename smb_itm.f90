@@ -36,6 +36,9 @@ contains
         type(itm_par_class)     :: par
         character(len=*), intent(IN) :: filename 
 
+        ! Local variables 
+        integer :: file_unit 
+
         ! Local parameter definitions (identical to object)
         real(prec) :: trans_a, trans_b 
         real(prec) :: itm_c, itm_t 
@@ -70,9 +73,14 @@ contains
         alb_snow_wet       = par%alb_snow_wet
 
         ! Read parameters from input namelist file
-        open(7,file=trim(filename))
-        read(7,nml=itm_par)
-        close(7)
+        inquire(file=trim(filename),NUMBER=file_unit)
+        if (file_unit .gt. 0) then 
+            read(file_unit,nml=itm_par)
+        else
+            open(7,file=trim(filename))
+            read(7,nml=itm_par)
+            close(7)
+        end if 
 
         ! Store local parameter values in output object
         par%trans_a            = trans_a

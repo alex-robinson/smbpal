@@ -64,7 +64,7 @@ program test
     call smbpal_init(smb1,"Greenland.nml",x,y,lats)
     
     ! Equilibrate snowpack 
-    do k = 1, 100
+    do k = 1, 10
         write(*,*) "k = ", k 
 !         call smbpal_update(smb1,t2m_ann,t2m_sum,pr_ann,z_srf,H_ice,time_bp=0.0,sf_ann=sf_ann)
         call smbpal_update(smb1,t2m,pr,z_srf,H_ice,time_bp=0.0,sf=sf)
