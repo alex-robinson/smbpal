@@ -145,7 +145,7 @@ contains
       
       ! Snow melt will use all energy, none left for ice melt
       melted_snow = melt_pot*dt
-      melted_ice  = 0.d0
+      melted_ice  = 0.0
       
     end if    
 
@@ -154,6 +154,9 @@ contains
 
     ! Remove any melted snow from the snow height budget
     H_snow = H_snow - melted_snow
+
+    ! To avoid numerical issues with dt>1
+    H_snow = max(H_snow,0.0)
 
     ! Adjust the albedo (accounting for actual amount of melt)
     alb_s = calc_albedo_surface(par,z_srf,H_ice,H_snow,PDDs,melt=melt/dt)

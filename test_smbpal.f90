@@ -66,11 +66,11 @@ program test
     ! Equilibrate snowpack 
     do k = 1, 100
         write(*,*) "k = ", k 
-!         call smbpal_update(smb1,t2m_ann,t2m_sum,pr_ann,z_srf,H_ice,time_bp=0.0)
+!         call smbpal_update(smb1,t2m_ann,t2m_sum,pr_ann,z_srf,H_ice,time_bp=0.0,sf_ann=sf_ann)
         call smbpal_update(smb1,t2m,pr,z_srf,H_ice,time_bp=0.0,sf=sf)
     end do 
 
-!     call smbpal_update(smb1,t2m_ann,t2m_sum,pr_ann,z_srf,H_ice,time_bp=0.0, &
+!     call smbpal_update(smb1,t2m_ann,t2m_sum,pr_ann,z_srf,H_ice,time_bp=0.0,sf_ann=sf_ann, &
 !                         file_out=file_out,write_init=.TRUE.,write_now=.TRUE.)
     call smbpal_update(smb1,t2m,pr,z_srf,H_ice,time_bp=0.0,sf=sf, &
                        file_out=file_out,write_init=.TRUE.,write_now=.TRUE.)

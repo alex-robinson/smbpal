@@ -122,119 +122,31 @@ contains
         logical, intent(IN), optional :: write_init, calc_mon, write_now
 
         ! Local variables
-        logical :: init_now, calc_monthly, write_out_now   
-        integer :: day, m, nx, ny, mnow, mday  
+        real(prec), allocatable :: t2m(:,:,:), pr(:,:,:), sf(:,:,:) 
+        integer :: day, m
         real(prec) :: dt 
 
-        type(smbpal_param_class) :: par
-        type(smbpal_state_class) :: now
-
-        ! Determine whether this is first time running (for output)
-        init_now = .FALSE. 
-        if (present(write_init)) init_now = write_init 
-
-        calc_monthly = .FALSE. 
-        if (present(calc_mon))     calc_monthly = calc_mon 
-        if (present(file_out_mon)) calc_monthly = .TRUE. 
-
-        write_out_now = .FALSE. 
-        if (present(write_now)) write_out_now = write_now 
-
-        ! Fill in local versions for easier access 
-        par = smb%par 
-        now = smb%now 
-
-        ! Initialize annual output file if needed
-        if (write_out_now .and. present(file_out_day)) then
-            if (init_now) call smbpal_write_init(par,file_out_day,z_srf,H_ice)
-        end if 
-
-        ! First calculate PDDs for the whole year (input to itm)
-        now%PDDs = 0.0 
-        do day = 1, ndays, 10
-            now%t2m  = t2m_ann-(t2m_sum-t2m_ann)*cos(2.0*pi*real(day-15)/real(ndays))
-            now%PDDs = now%PDDs + calc_temp_effective(now%t2m-273.15,par%Teff_sigma)*10.0
-        end do 
-
-        ! Initialize averaging 
-        call smbpal_average(smb%ann,now,step="init")
-
-        if (calc_monthly) then 
-            do m = 1, 12 
-                call smbpal_average(smb%mon(m),now,step="init")
-            end do
-        end if 
-
-        mnow = 1 
-        mday = 0 
-
-        dt = 1.0 
-
-        do day = 1, ndays
-
-            ! Determine t2m, pr, sf and S today 
-            now%t2m  = t2m_ann-(t2m_sum-t2m_ann)*cos(2.0*pi*real(day-15)/real(ndays)) 
-            now%pr = pr_ann
-
-            if (present(sf_ann)) then 
-                now%sf = sf_ann
-            else 
-                now%sf = now%pr * calc_snowfrac(now%t2m,par%sf_a,par%sf_b)
-            end if 
-
-            now%S = calc_insol_day(day,dble(par%lats),dble(time_bp),fldr="libs/insol/input")
-
-            ! Call mass budget for today
-            call calc_snowpack_budget_day(par%itm,dt,z_srf,H_ice,now%S,now%t2m,now%PDDs, &
-                                          now%pr,now%sf,now%H_snow,now%alb_s,now%smbi, &
-                                          now%smb,now%melt,now%runoff,now%refrz,now%melt_net)
+        allocate(t2m(size(t2m_ann,1),size(t2m_ann,2),12))
+        allocate( pr(size(t2m_ann,1),size(t2m_ann,2),12))
+        allocate( sf(size(t2m_ann,1),size(t2m_ann,2),12))
         
-
-            ! Get averages 
-            call smbpal_average(smb%ann,now,step="step")
-
-            if (calc_monthly) then 
-                call smbpal_average(smb%mon(mnow),now,step="step")
-
-                mday = mday + 1 
-                if (mday .eq. ndays_mon) then 
-                    call smbpal_average(smb%mon(mnow),now,step="end",nt=real(ndays_mon))
-                    mnow = mnow + 1
-                    mday = 0 
-                end if 
+        do m = 1, 12
+            ! Determine t2m, pr, sf and S today 
+            day = m*30
+            t2m(:,:,m) = t2m_ann-(t2m_sum-t2m_ann)*cos(2.0*pi*real(day-15)/real(ndays))
+        
+            pr(:,:,m)  = pr_ann
+            if (present(sf_ann)) then 
+                sf(:,:,m) = sf_ann
+            else 
+                sf(:,:,m) = pr(:,:,m) * calc_snowfrac(t2m(:,:,m),smb%par%sf_a,smb%par%sf_b)
             end if 
 
-            if (write_out_now .and. present(file_out_day)) then 
-                ! Write daily output for this year 
-                call smbpal_write(now,file_out,time_bp=time_bp,step="day",nstep=day)
-            end if 
-    
-        end do 
+        end do  
 
-        ! Finalize annual average 
-        call smbpal_average(smb%ann,now,step="end",nt=real(ndays))
-
-        ! Calculate surface temp 
-        smb%ann%tsrf = calc_temp_surf(smb%ann%t2m,smb%ann%melt_net*ndays,fac=par%firn_fac)
-
-        ! Repopulate global now variable (in case it is needed)
-        smb%now = now 
-
-        ! Annual I/O 
-        if (write_out_now .and. present(file_out)) then
-            if (init_now) call smbpal_write_init(par,file_out,z_srf,H_ice)
-            call smbpal_write(smb%ann,file_out,time_bp=time_bp,step="ann")
-
-        end if 
-
-        ! Monthly I/O 
-        if (write_out_now .and. calc_monthly .and. present(file_out_mon)) then
-            if (init_now) call smbpal_write_init(par,file_out_mon,z_srf,H_ice)
-            do m = 1, 12
-                call smbpal_write(smb%mon(m),file_out_mon,time_bp=time_bp,step="mon",nstep=m)
-            end do 
-
-        end if 
+        ! Call monthly interface
+        call smbpal_update_monthly(smb,t2m,pr,z_srf,H_ice,time_bp,sf, &
+                        file_out,file_out_mon,file_out_day,write_init,calc_mon,write_now)
 
         return 
 
