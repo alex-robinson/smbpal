@@ -1,80 +1,5 @@
 library(RNetCDF)
-library(myr)
-
-rmse = function (x, ii = c(1:length(x)), round = NA) 
-{
-    x <- x[ii]
-    ii1 <- which(!is.na(x))
-    rmse <- sqrt(sum(x[ii1]^2)/length(x[ii1]))
-    if (!is.na(round)) 
-        rmse <- round(rmse, round)
-    return(rmse)
-}
-
-plot_comparison = function(topo,mask,rcm,pdd,itm,zlim=NULL,dzlim=NULL,
-                           xlim=range(topo$xc),ylim=range(topo$yc))
-{   
-    colpalette  = rev(c('#d7191c','#fdae61','#ffffbf','#abdda4','#2b83ba'))
-    dcolpalette = rev(c('#ca0020','#f4a582','#f7f7f7','#92c5de','#0571b0'))
-
-    var0 = rcm
-    var1 = pdd
-    var2 = itm
-
-    # Limit to mask 
-    var0[which(mask!=1 | is.na(mask))] = NA 
-    var1[which(mask!=1 | is.na(mask))] = NA 
-    var2[which(mask!=1 | is.na(mask))] = NA 
-
-    dvar1 = var1-var0 
-    dvar2 = var2-var0 
-
-    # Determine zlims
-    if (is.null(zlim))  zlim  = range(var0,var1,var2,na.rm=TRUE)
-    if (is.null(dzlim)) dzlim = range(dvar1,dvar2,na.rm=TRUE)
-
-    # Generate breaks based on desired zlims
-    breaks  = pretty(zlim,11)
-    dbreaks = pretty(dzlim,11)
-
-    # Make sure zlims are consistent with actual breaks
-    zlim  = range(breaks)
-    dzlim = range(dbreaks)
-
-    col  = colorRampPalette(colpalette)(length(breaks)-1)
-    dcol = colorRampPalette(dcolpalette)(length(dbreaks)-1)
-    
-    var0[var0<zlim[1]] = zlim[1]
-    var0[var0>zlim[2]] = zlim[2]
-    var1[var1<zlim[1]] = zlim[1]
-    var1[var1>zlim[2]] = zlim[2]
-    var2[var2<zlim[1]] = zlim[1]
-    var2[var2>zlim[2]] = zlim[2]
-
-    par(plt=c(0.02,0.3,0.52,0.98))
-    plot(xlim,ylim,type="n",ann=FALSE,axes=FALSE)
-    image(topo$xc,topo$yc,var0,add=TRUE,breaks=breaks,col=col)
-    par(plt=c(0.32,0.6,0.52,0.98),new=TRUE)
-    plot(xlim,ylim,type="n",ann=FALSE,axes=FALSE)
-    image(topo$xc,topo$yc,var1,add=TRUE,breaks=breaks,col=col)
-    par(plt=c(0.62,0.9,0.52,0.98),new=TRUE)
-    plot(xlim,ylim,type="n",ann=FALSE,axes=FALSE)
-    image(topo$xc,topo$yc,var2,add=TRUE,breaks=breaks,col=col)
-    par(plt=c(0.92,0.94,0.65,0.85),new=TRUE)
-    mylegend(breaks=breaks,col=col)
-
-    par(plt=c(0.02,0.3,0.02,0.48),new=TRUE)
-    plot(xlim,ylim,type="n",ann=FALSE,axes=FALSE)
-    par(plt=c(0.32,0.6,0.02,0.48),new=TRUE)
-    plot(xlim,ylim,type="n",ann=FALSE,axes=FALSE)
-    image(topo$xc,topo$yc,dvar1,add=TRUE,breaks=dbreaks,col=dcol)
-    par(plt=c(0.62,0.9,0.02,0.48),new=TRUE)
-    plot(xlim,ylim,type="n",ann=FALSE,axes=FALSE)
-    image(topo$xc,topo$yc,dvar2,add=TRUE,breaks=dbreaks,col=dcol)
-    par(plt=c(0.92,0.94,0.15,0.35),new=TRUE)
-    mylegend(breaks=dbreaks,col=dcol)
-
-}
+source("functions.r")
 
 # Load data
 if (FALSE) {
@@ -121,7 +46,7 @@ close.nc(a)
 # Get errors of interest 
 mask = topo$zs*NA 
 mask[topo$zs>0] = 1.0 
-# mask[topo$zs>0 & topo$H >0] = 1.0 
+mask[topo$zs>0 & topo$H >0] = 1.0 
 nmask = sum(mask,na.rm=TRUE)
 
 tbl = data.frame(name=c("t2m","tsrf","PDDs","smb","melt","refrz","runoff"),pdd=NA,itm=NA,mar=NA,
@@ -152,16 +77,31 @@ for (k in 1:dim(tbl)[2]) {
 
 ptype = "png"
 
-myfigure("plots","compare_smb",asp=1.0,pointsize=12,type=ptype)
-plot_comparison(topo,mask,marann$smb,pdd$smb,itm$smb,zlim=c(-20,10),dzlim=c(-5,5))
+mask = topo$zs*NA 
+mask[topo$zs>0] = 1.0 
+
+myfigure("plots","compare_pdd",asp=1.0,pointsize=12,type=ptype)
+plot_comparison(topo,mask,marann$pdd,pdd$PDDs,itm$PDDs,zlim=c(0,500),dzlim=c(-100,100))
 graphics.off()
 
-myfigure("plots","compare_melt",asp=1.0,pointsize=12,type=ptype)
-plot_comparison(topo,mask,marann$me,pdd$melt,itm$melt,zlim=c(0,30),dzlim=c(-5,5))
-graphics.off()
+# myfigure("plots","compare_smb",asp=1.0,pointsize=12,type=ptype)
+# plot_comparison(topo,mask,marann$smb,pdd$smb,itm$smb,zlim=c(-20,10),dzlim=c(-5,5))
+# graphics.off()
 
-myfigure("plots","compare_alb",asp=1.0,pointsize=12,type=ptype)
-plot_comparison(topo,mask,marann$al,pdd$alb_s,itm$alb_s,zlim=c(0,1),dzlim=c(-0.5,0.5))
-graphics.off()
+# myfigure("plots","compare_melt",asp=1.0,pointsize=12,type=ptype)
+# plot_comparison(topo,mask,marann$me,pdd$melt,itm$melt,zlim=c(0,30),dzlim=c(-5,5))
+# graphics.off()
+
+# myfigure("plots","compare_alb",asp=1.0,pointsize=12,type=ptype)
+# plot_comparison(topo,mask,marann$al,pdd$alb_s,itm$alb_s,zlim=c(0,1),dzlim=c(-0.2,0.2))
+# graphics.off()
+
+# myfigure("plots","compare_refrz",asp=1.0,pointsize=12,type=ptype)
+# plot_comparison(topo,mask,marann$rz,pdd$refrz,itm$refrz,zlim=c(0,5),dzlim=c(-1,1))
+# graphics.off()
+
+# myfigure("plots","compare_tsrf",asp=1.0,pointsize=12,type=ptype)
+# plot_comparison(topo,mask,marann$ts,pdd$tsrf,itm$tsrf,zlim=c(240,280),dzlim=c(-5,5))
+# graphics.off()
 
 

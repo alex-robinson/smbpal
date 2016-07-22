@@ -13,14 +13,14 @@ module smb_pdd
 contains 
 
 
-    elemental subroutine calc_ablation_pdd(abl,sif,pdds,acc,csnow,cice,csi)
+    elemental subroutine calc_ablation_pdd(abl_pot,abl,sif,pdds,acc,csnow,cice,csi)
         ! Determine total ablation based on input pdds
         
         implicit none 
 
-        real(prec), intent(INOUT) :: abl, sif 
-        real(prec), intent(IN)    :: pdds, acc
-        real(prec), intent(IN)    :: csnow, csi, cice 
+        real(prec), intent(OUT) :: abl_pot, abl, sif 
+        real(prec), intent(IN)  :: pdds, acc
+        real(prec), intent(IN)  :: csnow, csi, cice 
 
         real(prec) :: simax
         real(prec) :: abl_snow_pot, abl_ice_pot 
@@ -33,7 +33,8 @@ contains
         ! from the left over pdds, if there are any.
         abl_snow_pot = pdds*csnow 
         abl_ice_pot  = max(0.0, (abl_snow_pot-acc)*cice/csnow)
-
+        abl_pot      = abl_snow_pot + abl_ice_pot 
+        
         ! Get the mass balance
         if (abl_snow_pot .le. simax) then 
             abl = 0.0 

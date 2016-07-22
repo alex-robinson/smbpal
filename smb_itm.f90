@@ -169,39 +169,32 @@ contains
     ! Adjust the albedo (accounting for actual amount of melt)
     alb_s = calc_albedo_surface(par,z_srf,H_ice,H_snow,PDDs,melt=melt/dt)
 
-    ! Determine how much new ice is made from compression of remaining snow
-    snow_to_ice = 0.d0
-    if (H_snow .gt. par%H_snow_max) then 
-      ! Assume excess contributes to new ice
-      snow_to_ice = H_snow - par%H_snow_max
-      H_snow = par%H_snow_max
-    end if
-
     ! Determine what fraction of the melted snow and rain will refreeze, 
     ! (Note: rf is zero if not on ice sheet or there is no snow cover)
-    if ( H_ice .gt. 0.0 .and. H_snow .gt. 0.0 ) then 
+!     if ( H_ice .gt. 0.0 .and. H_snow .gt. 0.0 ) then 
+!     if ( H_snow .gt. 0.0 ) then 
 
-        rfac = par%Pmaxfrac * sf / max(1e-5,pr)    ! max() here ensures no division by zero, if (snow+rain)==0, then rfac is zero anyway
-
-        ! Modify refreezing factor based on height of snow
-        if ( H_snow .gt. 2e3 ) then 
-            rfac = 1.0                                         ! refreezing factor is 1 for large snow heights.      
-        else if ( H_snow .gt. 1e3 ) then 
-            rfac = rfac + ((H_snow-1e3)/(2e3-1e3) ) * (1.0 - rfac) ! linear function increasing to rf=1 as H_snow increases to 2m.
-        end if
-
-    else 
-        rfac = 0.0 
-
-    end if
+    ! Modify refreezing factor based on height of snow 
+    rfac = par%Pmaxfrac * sf/max(1e-3,pr)
+    rfac = rfac + min(1.0,H_snow/1e3) * (1.0 - rfac) ! linear function increasing to rf=1 as H_snow increases to 1m.
 
     ! Determine the actual maximum amount of refreezing (limited to snowpack thickness)
     refrz_rain     = min(rf*dt*rfac,H_snow)                   ! First rain takes up refreezing capacity
     refrz_snow     = min(melted_snow*rfac,H_snow-refrz_rain)  ! Melted_snow uses remaining capacity if it needs it
     refrz          = refrz_snow + refrz_rain                  ! Total refreezing
 
+    ! Any snow thickness used for refreezing turns to ice 
+    ! Additionally determine how much new ice is made from compression of remaining snow
+    snow_to_ice = refrz
+    H_snow = H_snow - refrz
+    if (H_snow .gt. par%H_snow_max) then 
+      ! Assume excess contributes to new ice
+      snow_to_ice = snow_to_ice + (H_snow - par%H_snow_max)
+      H_snow = par%H_snow_max
+    end if
+
     ! Determine net runoff
-    runoff      = (melted_snow-refrz_snow) + (rf-refrz_rain) + melted_ice
+    runoff = (melted_snow-refrz_snow) + (rf-refrz_rain) + melted_ice
 
     ! Get the global surface mass balance
     smb = (sf + rf)*dt - runoff
@@ -219,7 +212,7 @@ contains
         melt_net = refrz - melted_snow    ! refrz is zero here, but keep it for consistency
     end if 
 
-    ! Convert back to daily rates 
+    ! Convert back to daily rates [mm/d]
     melt     = melt/dt 
     melt_net = melt_net/dt 
     runoff   = runoff/dt 

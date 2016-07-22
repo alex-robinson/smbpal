@@ -18,7 +18,8 @@
         real(prec) :: const_kabp
         character(len=512)  :: insol_fldr 
         character(len=16)   :: abl_method 
-        real(prec) :: Teff_sigma, sf_a, sf_b, firn_fac  
+        real(prec) :: sigma_snow, sigma_melt, sigma_land
+        real(prec) :: sf_a, sf_b, firn_fac  
         real(prec) :: mm_snow, mm_ice 
 
         real(prec), allocatable :: x(:), y(:)
@@ -32,6 +33,7 @@
         real(prec), allocatable   :: t2m(:,:)            ! Surface temperature [K]
         real(prec), allocatable   :: pr(:,:), sf(:,:)    ! Precip, snowfall [mm/a or mm/d]
         real(prec), allocatable   :: S(:,:)              ! Insolation [W/m2]
+        real(prec), allocatable   :: sigma(:,:)          ! Effective temp. (ie, PDDs) [num. of days]
         real(prec), allocatable   :: PDDs(:,:)           ! Effective temp. (ie, PDDs) [num. of days]
         real(prec), allocatable   :: tsrf(:,:)           ! Effective temp. (ie, PDDs) [num. of days]
         
@@ -102,7 +104,7 @@ contains
         smb%now%H_snow = smb%par%itm%H_snow_max 
 
         ! Test calculation of insolation to load orbital params 
-        tmp = calc_insol_day(180,65.d0,0.d0,fldr="libs/insol/input")
+        tmp = calc_insol_day(180,65.d0,0.d0,fldr=smb%par%insol_fldr)
 
         return 
 
@@ -207,10 +209,18 @@ contains
             t2m_daily = tmp 
             call convert_monthly_daily_3D(dble(pr),tmp,days=daily)
             pr_daily = tmp 
-            call convert_monthly_daily_3D(dble(sf),tmp,days=daily)
-            sf_daily = tmp 
-            where(sf_daily .lt. 0.0) sf_daily = 0.0 
 
+            if (present(sf)) then 
+                call convert_monthly_daily_3D(dble(sf),tmp,days=daily)
+                sf_daily = tmp 
+                where(sf_daily .lt. 0.0) sf_daily = 0.0 
+            else 
+                do k = 1, ndays_daily 
+                    sf_daily(:,:,k) = pr_daily(:,:,k) * calc_snowfrac(t2m_daily(:,:,k),smb%par%sf_a,smb%par%sf_b)
+                end do 
+            end if 
+
+                
             ! Call daily subroutine 
             call smbpal_update_itm(smb,daily,t2m_daily,pr_daily,sf_daily,z_srf,H_ice,time_bp, &
                                    file_out_mon,file_out_day,write_init,calc_mon,write_now)
@@ -224,13 +234,22 @@ contains
             
             t2m_ann = sum(t2m,dim=3) / 12.0 
             pr_ann  = sum(pr,dim=3)  / 12.0 
-            sf_ann  = sum(sf,dim=3)  / 12.0 
-            
+
+            if (present(sf)) then 
+                sf_ann  = sum(sf,dim=3) / 12.0 
+            else 
+                sf_ann  = pr_ann    ! Should be improved in the future 
+            end if 
+
             ! First calculate PDDs for the whole year (input to pdd)
             smb%now%PDDs = 0.0 
             do k = 1, 12
                 smb%now%t2m  = t2m(:,:,k)
-                smb%now%PDDs = smb%now%PDDs + calc_temp_effective(smb%now%t2m-273.15,smb%par%Teff_sigma)*30.0
+
+                smb%now%sigma = smb%par%sigma_snow 
+                where (z_srf .gt. 0.0 .and. H_ice .eq. 0.0) smb%now%sigma = smb%par%sigma_land 
+                where (H_ice .gt. 0.0 .and. smb%now%t2m .ge. 273.15) smb%now%sigma = smb%par%sigma_melt
+                smb%now%PDDs = smb%now%PDDs + calc_temp_effective(smb%now%t2m-273.15,smb%now%sigma)*30.0
             end do 
 
             smb%ann = smbpal_update_pdd(smb%par,smb%now,z_srf,H_ice, &
@@ -299,7 +318,7 @@ contains
         do day = 1, ndays, 10
             k1 = idx_today(days,day)
             now%t2m = var_today(days(k1-1),days(k1),t2m(:,:,k1-1),t2m(:,:,k1),day)
-            now%PDDs = now%PDDs + calc_temp_effective(now%t2m-273.15,par%Teff_sigma)*10.0
+            now%PDDs = now%PDDs + calc_temp_effective(now%t2m-273.15,par%sigma_snow)*10.0
         end do 
 
         ! Initialize averaging 
@@ -362,7 +381,7 @@ contains
         call smbpal_average(smb%ann,now,step="end",nt=real(ndays)/dt)
 
         ! Calculate surface temp 
-        smb%ann%tsrf = calc_temp_surf(smb%ann%t2m,smb%ann%melt_net*ndays,fac=par%firn_fac)
+        smb%ann%tsrf = calc_temp_surf(smb%ann%t2m,H_ice,smb%ann%melt_net*ndays,fac=par%firn_fac)
 
         ! Repopulate global now variable (in case it is needed)
         smb%now = now 
@@ -398,19 +417,27 @@ contains
         ann%sf   = sf_ann
 
         ! Get ablation
-        call calc_ablation_pdd(ann%melt,ann%melt_net,ann%PDDs,ann%sf*360.0, &
+        call calc_ablation_pdd(ann%melt,ann%runoff,ann%refrz,ann%PDDs,ann%sf*real(ndays), &
                                 par%mm_snow,par%mm_ice,par%itm%Pmaxfrac)
 
-        ! Get melt rate [mm/a] => [mm/d]
-        ann%melt = ann%melt / 360.0 
-
+        ! Get daily rate [mm/a] => [mm/d]
+        ann%refrz  = ann%refrz  / real(ndays)
+        ann%melt   = ann%melt   / real(ndays)
+        ann%runoff = ann%runoff / real(ndays)
+        
         ! Get surface mass balance 
-        ann%smb  = ann%sf - ann%melt 
+        ann%smb  = ann%sf - ann%runoff 
         ann%smbi = ann%smb 
 
-        ! Calculate surface temp 
-        ann%tsrf = calc_temp_surf(ann%t2m,ann%melt_net,fac=par%firn_fac)
+        ! Get melt_net for surface temp calculations 
+        ann%melt_net = ann%refrz 
 
+        ! Calculate surface temp 
+        ann%tsrf = calc_temp_surf(ann%t2m,H_ice,ann%melt_net*ndays,fac=par%firn_fac)
+
+        ! Define other missing variables 
+        ann%alb_s = 0.0 
+        
         return 
 
     end function smbpal_update_pdd
@@ -428,6 +455,7 @@ contains
 
     end subroutine smbpal_end
 
+! "Fix TSURF calculations!!!" 
 
     subroutine smbpal_par_load(par,filename)
 
@@ -442,18 +470,22 @@ contains
         logical    :: const_insol
         real(prec) :: const_kabp
         character(len=16)  :: abl_method
-        real(prec)         :: Teff_sigma, sf_a, sf_b, firn_fac 
+        real(prec)         :: sigma_snow, sigma_melt, sigma_land
+        real(prec)         :: sf_a, sf_b, firn_fac 
         real(prec)         :: mm_snow, mm_ice 
 
         namelist /smbpal_par/ insol_fldr, const_insol, const_kabp, &
-            abl_method, Teff_sigma, sf_a, sf_b, firn_fac, mm_snow, mm_ice 
+            abl_method, sigma_snow, sigma_melt, sigma_land, &
+            sf_a, sf_b, firn_fac, mm_snow, mm_ice 
                 
         ! Store initial values in local parameter values 
         insol_fldr  = par%insol_fldr
         const_insol = par%const_insol
         const_kabp  = par%const_kabp
         abl_method  = par%abl_method
-        Teff_sigma  = par%Teff_sigma 
+        sigma_snow  = par%sigma_snow 
+        sigma_melt  = par%sigma_melt 
+        sigma_land  = par%sigma_land 
         sf_a        = par%sf_a 
         sf_b        = par%sf_b 
         firn_fac    = par%firn_fac 
@@ -475,7 +507,9 @@ contains
         par%const_insol = const_insol
         par%const_kabp  = const_kabp
         par%abl_method  = abl_method
-        par%Teff_sigma  = Teff_sigma 
+        par%sigma_snow  = sigma_snow 
+        par%sigma_melt  = sigma_melt 
+        par%sigma_land  = sigma_land 
         par%sf_a        = sf_a 
         par%sf_b        = sf_b 
         par%firn_fac    = firn_fac 
@@ -496,17 +530,20 @@ contains
     !
     ! =======================================================
 
-    elemental function calc_temp_surf(tann,melt_net,fac) result(ts)
+    elemental function calc_temp_surf(tann,H_ice,melt_net,fac) result(ts)
         ! Surface temperature is equal to the annual mean
         ! near-surface temperature + warming due to 
         ! freezing of superimposed ice - cooling due to melt
         implicit none 
 
-        real(prec), intent(IN) :: tann, melt_net, fac 
+        real(prec), intent(IN) :: tann, H_ice, melt_net, fac 
         real(prec) :: ts 
 
-        ts = (tann+fac*melt_net)    ! Positive melt_net (refreezing) warms firn
-        ts = min(273.15,ts)         ! Limit temps to freezing temperature
+        ! Adjust temp to account for positive melt_net (refreezing) warms firn
+        ts = (tann+fac*max(0.0,melt_net))    
+
+        ! Limit temps to freezing temperature on the ice sheet 
+        if (H_ice .gt. 0.0) ts = min(273.15,ts)        
 
         return 
 
@@ -673,6 +710,7 @@ contains
         allocate(now%pr(nx,ny))
         allocate(now%sf(nx,ny))
         allocate(now%S(nx,ny))
+        allocate(now%sigma(nx,ny))
         allocate(now%PDDs(nx,ny))
         allocate(now%tsrf(nx,ny))
         allocate(now%H_snow(nx,ny))
@@ -700,6 +738,7 @@ contains
         if (allocated(now%pr))       deallocate(now%pr)
         if (allocated(now%sf))       deallocate(now%sf)
         if (allocated(now%S))        deallocate(now%S)
+        if (allocated(now%sigma))    deallocate(now%sigma)
         if (allocated(now%PDDs))     deallocate(now%PDDs)
         if (allocated(now%tsrf))     deallocate(now%tsrf)
         if (allocated(now%H_snow))   deallocate(now%H_snow)
@@ -740,6 +779,7 @@ contains
         call field_average(ave%melt_net,now%melt_net,step,nt)
         
         ! Annual values, averaged for completeness 
+        call field_average(ave%sigma,  now%sigma,  step,nt)
         call field_average(ave%PDDs,   now%PDDs,   step,nt)
         call field_average(ave%tsrf,   now%tsrf,   step,nt)
         

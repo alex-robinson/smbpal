@@ -19,9 +19,6 @@ program test
 
     integer :: k 
 
-    ! Output file 
-    file_out = "output/smbpal_eraint_itm.nc"
-
     ! Load domain test data (Greenland)
     file_topo = "data/GRL-20KM_TOPO-B13_gl0.05.nc"
     nx = nc_size(file_topo,"xc")
@@ -63,8 +60,11 @@ program test
     ! Initialize the smbpal object and output file
     call smbpal_init(smb1,"Greenland.nml",x,y,lats)
     
+    ! Define output filename 
+    file_out = "output/smbpal_eraint_"//trim(smb1%par%abl_method)//".nc"
+
     ! Equilibrate snowpack 
-    do k = 1, 10
+    do k = 1, 100
         write(*,*) "k = ", k 
 !         call smbpal_update(smb1,t2m_ann,t2m_sum,pr_ann,z_srf,H_ice,time_bp=0.0,sf_ann=sf_ann)
         call smbpal_update(smb1,t2m,pr,z_srf,H_ice,time_bp=0.0,sf=sf)
