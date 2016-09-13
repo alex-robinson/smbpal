@@ -826,7 +826,7 @@ contains
         integer :: idx 
 
         ! Determine the index of today 
-        do idx = 1, size(days)
+        do idx = 2, size(days)
             if (days(idx) .ge. day) exit
         end do 
 

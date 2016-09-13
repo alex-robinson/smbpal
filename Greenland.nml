@@ -2,7 +2,7 @@
     const_insol = False
     const_kabp  = 0.0
     insol_fldr  = "libs/insol/input"
-    abl_method  = "pdd"   ! "itm" or "pdd"
+    abl_method  = "itm"   ! "itm" or "pdd"
     sigma_snow  = 5.0     ! Standard deviation of temperature [K] over ice and snow
     sigma_melt  = 5.0     ! Standard deviation of temperature [K] in ablation zone
     sigma_land  = 5.0     ! Standard deviation of temperature [K] over land 
