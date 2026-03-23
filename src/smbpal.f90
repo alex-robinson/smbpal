@@ -15,35 +15,35 @@
         
     type smbpal_param_class
         type(itm_par_class) :: itm
-        logical    :: const_insol
-        real(prec) :: const_kabp
+        logical  :: const_insol
+        real(wp) :: const_kabp
         character(len=512)  :: insol_fldr 
         character(len=16)   :: abl_method 
-        real(prec) :: sigma_snow, sigma_melt, sigma_land
-        real(prec) :: sf_a, sf_b, firn_fac  
-        real(prec) :: mm_snow, mm_ice 
+        real(wp) :: sigma_snow, sigma_melt, sigma_land
+        real(wp) :: sf_a, sf_b, firn_fac  
+        real(wp) :: mm_snow, mm_ice 
 
-        real(prec), allocatable :: x(:), y(:)
-        real(prec), allocatable :: lats(:,:)           ! Latitude of domain [deg N]
-        real(prec) :: rho_sw
-        real(prec) :: rho_ice
+        real(wp), allocatable :: x(:), y(:)
+        real(wp), allocatable :: lats(:,:)              ! Latitude of domain [deg N]
+        real(wp) :: rho_sw
+        real(wp) :: rho_ice
 
     end type 
 
     type smbpal_state_class 
-        real(prec), allocatable   :: t2m(:,:)            ! Surface temperature [K]
-        real(prec), allocatable   :: pr(:,:), sf(:,:)    ! Precip, snowfall [mm/a or mm/d]
-        real(prec), allocatable   :: S(:,:)              ! Insolation [W/m2]
-        real(prec), allocatable   :: sigma(:,:)          ! Effective temp. (ie, PDDs) [num. of days]
-        real(prec), allocatable   :: PDDs(:,:)           ! Effective temp. (ie, PDDs) [num. of days]
-        real(prec), allocatable   :: tsrf(:,:)           ! Effective temp. (ie, PDDs) [num. of days]
+        real(wp), allocatable :: t2m(:,:)               ! Surface temperature [K]
+        real(wp), allocatable :: pr(:,:), sf(:,:)       ! Precip, snowfall [mm/a or mm/d]
+        real(wp), allocatable :: S(:,:)                 ! Insolation [W/m2]
+        real(wp), allocatable :: sigma(:,:)             ! Effective temp. (ie, PDDs) [num. of days]
+        real(wp), allocatable :: PDDs(:,:)              ! Effective temp. (ie, PDDs) [num. of days]
+        real(wp), allocatable :: tsrf(:,:)              ! Effective temp. (ie, PDDs) [num. of days]
         
         ! Prognostic variables
-        real(prec), allocatable   :: H_snow(:,:)         ! Snow thickness [mm]
-        real(prec), allocatable   :: alb_s(:,:)          ! Surface albedo 
-        real(prec), allocatable   :: smbi(:,:), smb(:,:) ! Surface mass balance [mm/a or mm/d]
-        real(prec), allocatable   :: melt(:,:), runoff(:,:), refrz(:,:)   ! smb components
-        real(prec), allocatable   :: melt_net(:,:)       ! Net surface melt, for calculating surface temp [mm]
+        real(wp), allocatable :: H_snow(:,:)            ! Snow thickness [mm]
+        real(wp), allocatable :: alb_s(:,:)             ! Surface albedo 
+        real(wp), allocatable :: smbi(:,:), smb(:,:)    ! Surface mass balance [mm/a or mm/d]
+        real(wp), allocatable :: melt(:,:), runoff(:,:), refrz(:,:)   ! smb components
+        real(wp), allocatable :: melt_net(:,:)          ! Net surface melt, for calculating surface temp [mm]
     end type 
 
     type smbpal_class
@@ -67,12 +67,12 @@ contains
 
         type(smbpal_class) :: smb
         character(len=*), intent(IN)  :: filename  ! Parameter file 
-        real(prec) :: x(:), y(:), lats(:,:)
+        real(wp) :: x(:), y(:), lats(:,:)
         character(len=*),  intent(IN), optional :: group, itm_group
 
         ! Local variables
-        integer :: nx, ny, m  
-        real(prec) :: tmp 
+        integer  :: nx, ny, m  
+        real(wp) :: tmp 
         character(len=32) :: nml_group, itm_nml_group
 
         ! Make sure we know the namelist group for the smbpal block
@@ -130,19 +130,19 @@ contains
         implicit none 
         
         type(smbpal_class), intent(INOUT) :: smb
-        real(prec), intent(IN) :: t2m_ann(:,:), t2m_sum(:,:)
-        real(prec), intent(IN) ::  pr_ann(:,:), z_srf(:,:), H_ice(:,:)
-        real(prec), intent(IN) :: time_bp       ! years BP 
-        real(prec), intent(IN), optional :: sf_ann(:,:)
+        real(wp), intent(IN) :: t2m_ann(:,:), t2m_sum(:,:)
+        real(wp), intent(IN) ::  pr_ann(:,:), z_srf(:,:), H_ice(:,:)
+        real(wp), intent(IN) :: time_bp       ! years BP 
+        real(wp), intent(IN), optional :: sf_ann(:,:)
         character(len=*), intent(IN), optional :: file_out      ! Annual output
         character(len=*), intent(IN), optional :: file_out_mon  ! Monthly output
         character(len=*), intent(IN), optional :: file_out_day  ! Daily output 
         logical, intent(IN), optional :: write_init, calc_mon, write_now
 
         ! Local variables
-        real(prec), allocatable :: t2m(:,:,:), pr(:,:,:), sf(:,:,:) 
+        real(wp), allocatable :: t2m(:,:,:), pr(:,:,:), sf(:,:,:) 
         integer :: day, m
-        real(prec) :: dt 
+        real(wp) :: dt 
 
         allocate(t2m(size(t2m_ann,1),size(t2m_ann,2),12))
         allocate( pr(size(t2m_ann,1),size(t2m_ann,2),12))
@@ -175,11 +175,11 @@ contains
         implicit none 
         
         type(smbpal_class), intent(INOUT) :: smb
-        real(prec), intent(IN) :: t2m(:,:,:), pr(:,:,:)
-        real(prec), intent(IN) ::  z_srf(:,:), H_ice(:,:)
-        real(prec), intent(IN) :: time_bp       ! years BP 
-        real(prec), intent(IN) :: time_equil    ! years to equilibrate
-        real(prec), intent(IN), optional :: sf(:,:,:)
+        real(wp), intent(IN) :: t2m(:,:,:), pr(:,:,:)
+        real(wp), intent(IN) ::  z_srf(:,:), H_ice(:,:)
+        real(wp), intent(IN) :: time_bp       ! years BP 
+        real(wp), intent(IN) :: time_equil    ! years to equilibrate
+        real(wp), intent(IN), optional :: sf(:,:,:)
 
         ! Local variables 
         integer :: n 
@@ -202,12 +202,12 @@ contains
         implicit none 
         
         type(smbpal_class), intent(INOUT) :: smb
-        real(prec),         intent(IN) :: t2m(:,:,:)                ! [K] Monthly temperature fields
-        real(prec),         intent(IN) :: pr(:,:,:)                 ! [mm we/d] Monthly precipitation rate fields 
-        real(prec),         intent(IN) :: z_srf(:,:)                ! [m] Surface elevation 
-        real(prec),         intent(IN) :: H_ice(:,:)                ! [m] Ice thickness 
-        real(prec),         intent(IN) :: time_bp                   ! [years BP] Current time (for insolation) 
-        real(prec),         intent(IN), optional :: sf(:,:,:)       ! [mm we/d] Monthly snowfall rate fields 
+        real(wp),         intent(IN) :: t2m(:,:,:)                ! [K] Monthly temperature fields
+        real(wp),         intent(IN) :: pr(:,:,:)                 ! [mm we/d] Monthly precipitation rate fields 
+        real(wp),         intent(IN) :: z_srf(:,:)                ! [m] Surface elevation 
+        real(wp),         intent(IN) :: H_ice(:,:)                ! [m] Ice thickness 
+        real(wp),         intent(IN) :: time_bp                   ! [years BP] Current time (for insolation) 
+        real(wp),         intent(IN), optional :: sf(:,:,:)       ! [mm we/d] Monthly snowfall rate fields 
         character(len=*),   intent(IN), optional :: file_out        ! Annual output filename
         character(len=*),   intent(IN), optional :: file_out_mon    ! Monthly output filename
         character(len=*),   intent(IN), optional :: file_out_day    ! Daily output filename 
@@ -219,13 +219,13 @@ contains
         logical :: init_now, write_out_now
         integer :: ndays_daily, k, day, k1   
         integer, allocatable :: daily(:)
-        real(prec), allocatable :: t2m_daily(:,:,:), pr_daily(:,:,:)
-        real(prec), allocatable :: sf_daily(:,:,:)
+        real(wp), allocatable :: t2m_daily(:,:,:), pr_daily(:,:,:)
+        real(wp), allocatable :: sf_daily(:,:,:)
         double precision, allocatable :: tmp(:,:,:)
         
-        real(prec), allocatable :: tmp4(:,:)
-        real(prec), allocatable :: t2m_ann(:,:), pr_ann(:,:), sf_ann(:,:) 
-        real(prec), allocatable :: PDDs_ann(:,:) 
+        real(wp), allocatable :: tmp4(:,:)
+        real(wp), allocatable :: t2m_ann(:,:), pr_ann(:,:), sf_ann(:,:) 
+        real(wp), allocatable :: PDDs_ann(:,:) 
 
         write_out_now = .FALSE. 
         if (present(write_now) .and. present(file_out)) write_out_now = write_now 
@@ -280,10 +280,10 @@ contains
             allocate(PDDs_ann(size(t2m,1),size(t2m,2)))
 
             t2m_ann = sum(t2m,dim=3) / 12.0 
-            pr_ann  = sum(pr, dim=3) / 12.0 *real(ndays,prec)       ! [mm we/d] => [mm we/a]
+            pr_ann  = sum(pr, dim=3) / 12.0 *real(ndays,wp)         ! [mm we/d] => [mm we/a]
 
             if (present(sf)) then 
-                sf_ann  = sum(sf,dim=3) / 12.0 *real(ndays,prec)    ! [mm we/d] => [mm we/a]
+                sf_ann  = sum(sf,dim=3) / 12.0 *real(ndays,wp)      ! [mm we/d] => [mm we/a]
             else 
                 sf_ann  = pr_ann    ! Should be improved in the future 
             end if 
@@ -330,9 +330,9 @@ contains
         
         type(smbpal_class), intent(INOUT) :: smb
         integer, intent(IN) :: days(:)
-        real(prec), intent(IN) :: t2m(:,:,:), pr(:,:,:), sf(:,:,:)
-        real(prec), intent(IN) ::  z_srf(:,:), H_ice(:,:)
-        real(prec), intent(IN) :: time_bp       ! years BP
+        real(wp), intent(IN) :: t2m(:,:,:), pr(:,:,:), sf(:,:,:)
+        real(wp), intent(IN) ::  z_srf(:,:), H_ice(:,:)
+        real(wp), intent(IN) :: time_bp       ! years BP
         character(len=*), intent(IN), optional :: file_out_mon  ! Monthly output
         character(len=*), intent(IN), optional :: file_out_day  ! Daily output 
         logical, intent(IN), optional :: write_init, calc_mon, write_now
@@ -343,13 +343,13 @@ contains
         integer, parameter :: ndays_mon = 30    ! 30 days per month  
         integer :: day, m, nx, ny, mnow, mday  
         integer :: k1 
-        real(prec) :: dt    ! [days]
+        real(wp) :: dt    ! [days]
         real(8) :: insol_time
         
         type(smbpal_param_class) :: par
         type(smbpal_state_class) :: now
 
-        real(prec), allocatable :: tmp(:,:) 
+        real(wp), allocatable :: tmp(:,:) 
 
         allocate(tmp(size(t2m,1),size(t2m,2)))
 
@@ -478,12 +478,12 @@ contains
 
         type(smbpal_state_class), intent(INOUT) :: ann
         type(smbpal_param_class), intent(IN)    :: par 
-        real(prec),               intent(IN)    :: PDDs_ann(:,:) 
-        real(prec),               intent(IN)    :: z_srf(:,:)
-        real(prec),               intent(IN)    :: H_ice(:,:)
-        real(prec),               intent(IN)    :: t2m_ann(:,:)
-        real(prec),               intent(IN)    :: pr_ann(:,:)
-        real(prec),               intent(IN)    :: sf_ann(:,:)
+        real(wp),               intent(IN)    :: PDDs_ann(:,:) 
+        real(wp),               intent(IN)    :: z_srf(:,:)
+        real(wp),               intent(IN)    :: H_ice(:,:)
+        real(wp),               intent(IN)    :: t2m_ann(:,:)
+        real(wp),               intent(IN)    :: pr_ann(:,:)
+        real(wp),               intent(IN)    :: sf_ann(:,:)
 
         ! Store known annual values
         ann%PDDs = PDDs_ann 
@@ -579,11 +579,11 @@ contains
         ! Local parameter definitions (identical to object)
         ! character(len=512) :: insol_fldr 
         ! logical    :: const_insol
-        ! real(prec) :: const_kabp
+        ! real(wp) :: const_kabp
         ! character(len=16)  :: abl_method
-        ! real(prec)         :: sigma_snow, sigma_melt, sigma_land
-        ! real(prec)         :: sf_a, sf_b, firn_fac 
-        ! real(prec)         :: mm_snow, mm_ice 
+        ! real(wp)         :: sigma_snow, sigma_melt, sigma_land
+        ! real(wp)         :: sf_a, sf_b, firn_fac 
+        ! real(wp)         :: mm_snow, mm_ice 
 
         ! namelist /smbpal/ insol_fldr, const_insol, const_kabp, &
         !     abl_method, sigma_snow, sigma_melt, sigma_land, &
@@ -647,8 +647,8 @@ contains
         ! freezing of superimposed ice - cooling due to melt
         implicit none 
 
-        real(prec), intent(IN) :: tann, H_ice, melt_net, fac 
-        real(prec) :: ts 
+        real(wp), intent(IN) :: tann, H_ice, melt_net, fac 
+        real(wp) :: ts 
 
         ! Adjust temp to account for positive melt_net (refreezing) warms firn
         ts = (tann+fac*max(0.0,melt_net))    
@@ -666,8 +666,8 @@ contains
         
         implicit none 
 
-        real(prec), intent(IN) :: t2m, a, b 
-        real(prec)             :: f 
+        real(wp), intent(IN) :: t2m, a, b 
+        real(wp)             :: f 
 
         f = -0.5*tanh(a*(t2m-b))+0.5 
 
@@ -687,7 +687,7 @@ contains
 
         type(smbpal_param_class), intent(IN) :: par 
         character(len=*),         intent(IN) :: filename 
-        real(prec), intent(IN), optional :: z_srf(:,:), H_ice(:,:) 
+        real(wp), intent(IN), optional :: z_srf(:,:), H_ice(:,:) 
 
         call nc_create(filename)
         call nc_write_dim(filename,"xc",x=par%x)
@@ -712,14 +712,14 @@ contains
 
         type(smbpal_state_class), intent(IN) :: now 
         character(len=*),         intent(IN) :: filename 
-        real(prec),               intent(IN) :: time_bp  
+        real(wp),               intent(IN) :: time_bp  
         character(len=*),         intent(IN) :: step  
         integer, intent(IN), optional        :: nstep 
 
         ! Local variables 
-        real(prec) :: ka_bp 
+        real(wp) :: ka_bp 
         integer :: ndat, nx, ny, nt   
-        real(prec), allocatable :: time(:) 
+        real(wp), allocatable :: time(:) 
         character(len=56) :: step_name 
 
         ka_bp = time_bp * 1e-3 
@@ -875,7 +875,7 @@ contains
         type(smbpal_state_class), intent(INOUT) :: ave
         type(smbpal_state_class), intent(IN)    :: now 
         character(len=*)  :: step
-        real(prec), optional :: nt 
+        real(wp), optional :: nt 
         
         call field_average(ave%t2m,    now%t2m,    step,nt)
         call field_average(ave%pr,     now%pr,     step,nt)
@@ -905,10 +905,10 @@ contains
         ! Generic routine to average a field through time 
 
         implicit none 
-        real(prec), intent(INOUT)    :: ave(:,:)
-        real(prec), intent(IN)       :: now(:,:)
+        real(wp), intent(INOUT)    :: ave(:,:)
+        real(wp), intent(IN)       :: now(:,:)
         character(len=*), intent(IN) :: step
-        real(prec), intent(IN), optional :: nt 
+        real(wp), intent(IN), optional :: nt 
 
         if (trim(step) .eq. "init") then
             ! Initialize field to zero  
@@ -953,9 +953,9 @@ contains
         ! x lies within x0 and x1
         implicit none 
         integer, intent(IN) :: x0, x1, x
-        real(prec), intent(IN) :: y0, y1
-        real(prec) :: y 
-        real(prec) :: alpha 
+        real(wp), intent(IN) :: y0, y1
+        real(wp) :: y 
+        real(wp) :: alpha 
 
         alpha = dble(x - x0) / dble(x1 - x0)
         y     = y0 + alpha*(y1-y0)

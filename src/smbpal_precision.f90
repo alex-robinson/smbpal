@@ -6,18 +6,18 @@ module smbpal_precision
     integer,  parameter :: sp  = kind(1.0)
     
     ! Precision used here
-    integer,  parameter :: prec = sp 
+    integer,  parameter :: wp = sp 
 
     ! Missing value aliases 
-    real(prec), parameter :: MISSING_VALUE_DEFAULT = -9999.0_dp 
-    real(prec), parameter :: MV     = MISSING_VALUE_DEFAULT
-    real(prec), parameter :: MV_INT = int(MISSING_VALUE_DEFAULT)
+    real(wp), parameter :: MISSING_VALUE_DEFAULT = -9999.0_dp 
+    real(wp), parameter :: MV     = MISSING_VALUE_DEFAULT
+    real(wp), parameter :: MV_INT = int(MISSING_VALUE_DEFAULT)
 
     ! Error values
-    real(prec), parameter :: ERR_DIST = 1E8_dp 
-    integer,  parameter   :: ERR_IND  = -1 
+    real(wp), parameter :: ERR_DIST = 1E8_dp 
+    integer,  parameter :: ERR_IND  = -1 
         
     ! Constants
-    real(prec), parameter :: pi = 3.14159265359
+    real(wp), parameter :: pi = 3.14159265359
 
 end module smbpal_precision 
