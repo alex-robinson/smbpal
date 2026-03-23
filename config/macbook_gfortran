@@ -1,0 +1,17 @@
+FC = gfortran
+
+# Set NC_CROOT and NC_FROOT in .zshrc
+INC_NC  = -I${NC_FROOT}/include
+LIB_NC  = -L${NC_FROOT}/lib -lnetcdff -L${NC_CROOT}/lib -lnetcdf
+
+FFLAGS  = -I$(objdir) -J$(objdir) -ffree-line-length-none
+
+ifeq ($(openmp), 1)
+    FFLAGS  = -I$(objdir) -J$(objdir) -ffree-line-length-none -fomit-frame-pointer -fopenmp 
+endif 
+
+LFLAGS  = $(LIB_NC)
+
+DFLAGS_NODEBUG = -O2
+DFLAGS_DEBUG   = -w -g -ggdb -ffpe-trap=invalid,zero,overflow,underflow -fbacktrace -fcheck=all
+DFLAGS_PROFILE = -O2 -pg
