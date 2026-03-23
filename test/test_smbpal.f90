@@ -1,7 +1,6 @@
 program test 
     
     use smbpal 
-    use insolation 
     use ncio 
 
     implicit none 
