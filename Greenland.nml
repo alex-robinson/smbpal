@@ -1,4 +1,4 @@
-&smbpal_par
+&smbpal
     const_insol = False
     const_kabp  = 0.0
     insol_fldr  = "libs/insol/input"
@@ -17,7 +17,7 @@
 /
 
 
-&itm_par
+&itm
         
     H_snow_max      =  5.0e3         ! Maximum allowed snowpack thickness [mm w.e.]
     Pmaxfrac        =  0.6           ! Refreezing factor 

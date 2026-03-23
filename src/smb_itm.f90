@@ -4,6 +4,7 @@ module smb_itm
     ! the melt_budget() subroutine, which takes arrays from the main
     ! program as input and outputs arrays of the calculated variables.
 
+    use nml
     use smbpal_precision 
 
     implicit none
@@ -13,8 +14,8 @@ module smb_itm
     real(prec), parameter :: L_m     = 3.35e5    ! Latent heat of melting [J/kg]
 
     type itm_par_class
-        real(prec) :: trans_a, trans_b 
-        real(prec) :: itm_c, itm_t 
+        real(prec) :: trans_a, trans_b, trans_c 
+        real(prec) :: itm_c, itm_t, itm_b, itm_lat0  
         real(prec) :: H_snow_max
         real(prec) :: Pmaxfrac
         real(prec) :: H_snow_crit_desert
@@ -27,84 +28,124 @@ module smb_itm
 
     private 
     public :: itm_par_class, itm_par_load
-    public :: calc_snowpack_budget_day 
+    public :: calc_snowpack_budget_step 
 
 contains
 
-    subroutine itm_par_load(par,filename)
+    subroutine itm_par_load(par,filename,init,group)
 
         type(itm_par_class)     :: par
         character(len=*), intent(IN) :: filename 
+        logical, optional :: init 
+        logical :: init_pars 
+        character(len=*), intent(IN), optional   :: group
 
         ! Local variables 
-        integer :: file_unit 
+        ! integer :: file_unit 
+        character(len=32) :: nml_group
+        
+        ! Make sure we know the namelist group for the itm block
+        if (present(group)) then
+            nml_group = trim(group)
+        else
+            nml_group = "itm"         ! Default parameter blcok name
+        end if
 
-        ! Local parameter definitions (identical to object)
-        real(prec) :: trans_a, trans_b 
-        real(prec) :: itm_c, itm_t 
-        real(prec) :: H_snow_max
-        real(prec) :: Pmaxfrac
-        real(prec) :: H_snow_crit_desert
-        real(prec) :: H_snow_crit_forest
-        real(prec) :: melt_crit 
-        real(prec) :: alb_ocean, alb_land, alb_forest, alb_ice 
-        real(prec) :: alb_snow_dry, alb_snow_wet 
+        ! ! Local parameter definitions (identical to object)
+        ! real(prec) :: trans_a, trans_b, trans_c 
+        ! real(prec) :: itm_c, itm_t, itm_b, itm_lat0 
+        ! real(prec) :: H_snow_max
+        ! real(prec) :: Pmaxfrac
+        ! real(prec) :: H_snow_crit_desert
+        ! real(prec) :: H_snow_crit_forest
+        ! real(prec) :: melt_crit 
+        ! real(prec) :: alb_ocean, alb_land, alb_forest, alb_ice 
+        ! real(prec) :: alb_snow_dry, alb_snow_wet 
 
-        namelist /itm_par/ trans_a, trans_b, itm_c, itm_t, H_snow_max, Pmaxfrac, &
-        H_snow_crit_desert, H_snow_crit_forest, melt_crit, alb_ocean, alb_land, &
-        alb_forest, alb_ice, alb_snow_dry, alb_snow_wet 
+        init_pars = .FALSE.
+        if (present(init)) init_pars = .TRUE.
+
+        call nml_read(filename,nml_group,"trans_a",par%trans_a,init=init_pars)
+        call nml_read(filename,nml_group,"trans_b",par%trans_b,init=init_pars)
+        call nml_read(filename,nml_group,"trans_c",par%trans_c,init=init_pars)
+        call nml_read(filename,nml_group,"itm_c",par%itm_c,init=init_pars)
+        call nml_read(filename,nml_group,"itm_t",par%itm_t,init=init_pars)
+        call nml_read(filename,nml_group,"itm_b",par%itm_b,init=init_pars)
+        call nml_read(filename,nml_group,"itm_lat0",par%itm_lat0,init=init_pars)
+        call nml_read(filename,nml_group,"H_snow_max",par%H_snow_max,init=init_pars)
+        call nml_read(filename,nml_group,"Pmaxfrac",par%Pmaxfrac,init=init_pars)
+        call nml_read(filename,nml_group,"H_snow_crit_desert",par%H_snow_crit_desert,init=init_pars)
+        call nml_read(filename,nml_group,"H_snow_crit_forest",par%H_snow_crit_forest,init=init_pars)
+        call nml_read(filename,nml_group,"melt_crit",par%melt_crit,init=init_pars)
+        call nml_read(filename,nml_group,"alb_ocean",par%alb_ocean,init=init_pars)
+        call nml_read(filename,nml_group,"alb_land",par%alb_land,init=init_pars)
+        call nml_read(filename,nml_group,"alb_forest",par%alb_forest,init=init_pars)
+        call nml_read(filename,nml_group,"alb_ice",par%alb_ice,init=init_pars)
+        call nml_read(filename,nml_group,"alb_snow_dry",par%alb_snow_dry,init=init_pars)
+        call nml_read(filename,nml_group,"alb_snow_wet",par%alb_snow_wet,init=init_pars)
+
+        ! namelist /itm/ trans_a, trans_b, trans_c, itm_c, itm_t, itm_b, itm_lat0, &
+        ! H_snow_max, Pmaxfrac, &
+        ! H_snow_crit_desert, H_snow_crit_forest, melt_crit, alb_ocean, alb_land, &
+        ! alb_forest, alb_ice, alb_snow_dry, alb_snow_wet 
 
                 
-        ! Store initial values in local parameter values 
-        trans_a            = par%trans_a
-        trans_b            = par%trans_b
-        itm_c              = par%itm_c
-        itm_t              = par%itm_t 
-        H_snow_max         = par%H_snow_max
-        Pmaxfrac           = par%Pmaxfrac
-        H_snow_crit_desert = par%H_snow_crit_desert
-        H_snow_crit_forest = par%H_snow_crit_forest
-        melt_crit          = par%melt_crit
-        alb_ocean          = par%alb_ocean
-        alb_land           = par%alb_land
-        alb_forest         = par%alb_forest
-        alb_ice            = par%alb_ice
-        alb_snow_dry       = par%alb_snow_dry
-        alb_snow_wet       = par%alb_snow_wet
+        ! ! Store initial values in local parameter values 
+        ! trans_a            = par%trans_a
+        ! trans_b            = par%trans_b
+        ! trans_c            = par%trans_c
+        ! itm_c              = par%itm_c
+        ! itm_t              = par%itm_t 
+        ! itm_b              = par%itm_b 
+        ! itm_lat0           = par%itm_lat0 
+        ! H_snow_max         = par%H_snow_max
+        ! Pmaxfrac           = par%Pmaxfrac
+        ! H_snow_crit_desert = par%H_snow_crit_desert
+        ! H_snow_crit_forest = par%H_snow_crit_forest
+        ! melt_crit          = par%melt_crit
+        ! alb_ocean          = par%alb_ocean
+        ! alb_land           = par%alb_land
+        ! alb_forest         = par%alb_forest
+        ! alb_ice            = par%alb_ice
+        ! alb_snow_dry       = par%alb_snow_dry
+        ! alb_snow_wet       = par%alb_snow_wet
 
-        ! Read parameters from input namelist file
-        inquire(file=trim(filename),NUMBER=file_unit)
-        if (file_unit .gt. 0) then 
-            read(file_unit,nml=itm_par)
-        else
-            open(7,file=trim(filename))
-            read(7,nml=itm_par)
-            close(7)
-        end if 
+        ! ! Read parameters from input namelist file
+        ! inquire(file=trim(filename),NUMBER=file_unit)
+        ! if (file_unit .gt. 0) then 
+        !     read(file_unit,nml=itm)
+        ! else
+        !     open(7,file=trim(filename))
+        !     read(7,nml=itm)
+        !     close(7)
+        ! end if 
 
-        ! Store local parameter values in output object
-        par%trans_a            = trans_a
-        par%trans_b            = trans_b
-        par%itm_c              = itm_c
-        par%itm_t              = itm_t 
-        par%H_snow_max         = H_snow_max
-        par%Pmaxfrac           = Pmaxfrac
-        par%H_snow_crit_desert = H_snow_crit_desert
-        par%H_snow_crit_forest = H_snow_crit_forest
-        par%melt_crit          = melt_crit
-        par%alb_ocean          = alb_ocean
-        par%alb_land           = alb_land
-        par%alb_forest         = alb_forest
-        par%alb_ice            = alb_ice
-        par%alb_snow_dry       = alb_snow_dry
-        par%alb_snow_wet       = alb_snow_wet
+        ! ! Store local parameter values in output object
+        ! par%trans_a            = trans_a
+        ! par%trans_b            = trans_b
+        ! par%trans_c            = trans_c
+        ! par%itm_c              = itm_c
+        ! par%itm_t              = itm_t 
+        ! par%itm_b              = itm_b 
+        ! par%itm_lat0           = itm_lat0 
+        ! par%H_snow_max         = H_snow_max
+        ! par%Pmaxfrac           = Pmaxfrac
+        ! par%H_snow_crit_desert = H_snow_crit_desert
+        ! par%H_snow_crit_forest = H_snow_crit_forest
+        ! par%melt_crit          = melt_crit
+        ! par%alb_ocean          = alb_ocean
+        ! par%alb_land           = alb_land
+        ! par%alb_forest         = alb_forest
+        ! par%alb_ice            = alb_ice
+        ! par%alb_snow_dry       = alb_snow_dry
+        ! par%alb_snow_wet       = alb_snow_wet
 
         return
 
     end subroutine itm_par_load
 
    
-    elemental subroutine calc_snowpack_budget_day(par,dt,z_srf,H_ice,S,t2m,PDDs,pr,sf, &
+    elemental subroutine calc_snowpack_budget_step(par,dt,lat,z_srf,H_ice,S,t2m,PDDs,pr,sf, &
                                            H_snow,alb_s,smbi,smb,melt,runoff,refrz,melt_net)
     ! Determine the total melt, accumulation and surface mass balance at a given point
     !  * Modified from rembo subroutine `melt_budget`
@@ -116,39 +157,43 @@ contains
     implicit none
 
     type(itm_par_class), intent(IN)    :: par 
-    real(prec),    intent(IN)    :: dt         ! Timestep [days], dt >= 1
-    real(prec),    intent(IN)    :: z_srf, H_ice, S, t2m, PDDs, pr, sf 
-    real(prec),    intent(INOUT) :: H_snow  
-    real(prec),    intent(OUT)   :: alb_s, smbi, smb, melt, runoff, refrz
-    real(prec),    intent(OUT)   :: melt_net  
+    real(prec),          intent(IN)    :: dt         ! Timestep [days], dt >= 1
+    real(prec),          intent(IN)    :: lat
+    real(prec),          intent(IN)    :: z_srf, H_ice, S, t2m, PDDs, pr, sf 
+    real(prec),          intent(INOUT) :: H_snow  
+    real(prec),          intent(OUT)   :: alb_s, smbi, smb, melt, runoff, refrz
+    real(prec),          intent(OUT)   :: melt_net  
 
     ! Local variables
+    real(prec) :: itm_c 
     real(prec) :: melt_pot
     real(prec) :: rf, atrans, rfac 
     real(prec) :: melted_snow, melted_ice, snow_to_ice 
     real(prec) :: refrz_rain, refrz_snow
 
-    ! Determine rainfall from precip and snowfall 
+    ! Determine rainfall rate from precip and snowfall [mm d-1]
     rf = pr - sf
 
     ! Determine preliminary surface and planetary albedo
     alb_s = calc_albedo_surface(par,z_srf,H_ice,H_snow,PDDs)
 
-    ! Add additional snowfall 
+    ! Add additional snowfall [mm]
     H_snow  = H_snow + sf*dt
 
     ! Get amount of potential melt from ITM scheme
+!     atrans   = calc_atmos_transmissivity(z_srf,H_ice,par%trans_a,par%trans_b,par%trans_c)
     atrans   = calc_atmos_transmissivity(z_srf,par%trans_a,par%trans_b)
-    melt_pot = calc_itm(S,t2m-273.15,alb_s,atrans,par%itm_c,par%itm_t)
+    itm_c    = itm_c_lat(par%itm_c,par%itm_b,par%itm_lat0,lat)
+    melt_pot = calc_itm(S,t2m-273.15,alb_s,atrans,itm_c,par%itm_t)
 
-    ! Determine how much snow and ice would be melted today
+    ! Determine how much snow and ice would be melted today [mm]
     if (melt_pot*dt .gt. H_snow) then 
       
       ! All snow is melted, the rest of energy converted to melt some ice
       ! The rest of energy will go into melting ice
       melted_snow = H_snow 
       melted_ice  = melt_pot*dt - H_snow
-
+      
     else
       
       ! Snow melt will use all energy, none left for ice melt
@@ -159,7 +204,7 @@ contains
 
     ! Total ablation
     melt   = melted_snow + melted_ice
-
+    
     ! Remove any melted snow from the snow height budget
     H_snow = H_snow - melted_snow
 
@@ -194,9 +239,9 @@ contains
     end if
 
     ! Determine net runoff
-    runoff = (melted_snow-refrz_snow) + (rf-refrz_rain) + melted_ice
+    runoff = (melted_snow-refrz_snow) + (rf*dt-refrz_rain) + melted_ice
 
-    ! Get the global surface mass balance
+    ! Get the global surface mass balance [mm]
     smb = (sf + rf)*dt - runoff
 
     ! Get the internal surface mass balance (what ice sheet model needs)
@@ -222,7 +267,7 @@ contains
 
     return
 
-    end subroutine calc_snowpack_budget_day
+    end subroutine calc_snowpack_budget_step
     
     ! ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     ! Subroutine : g e t _ a l b e d o
@@ -313,8 +358,9 @@ contains
         real(prec), intent(IN) :: z_srf, a, b 
         real(prec) :: at 
 
-        at = a + b*max(z_srf,0.d0)
-    
+!         at = a + b*max(z_srf,0.d0)
+        at = a + b*max(z_srf,0.d0)**0.5
+
         return 
 
     end function calc_atmos_transmissivity
@@ -331,7 +377,7 @@ contains
         ! t2m = [degrees Celcius] !!!
         implicit none
 
-        real(prec), intent(IN) :: S, t2m, alb_s, atrans, c, t
+        real(prec), intent(IN) :: S, t2m, alb_s, atrans, c, t 
         real(prec) :: melt
 
         ! Calculate potential melt [m/s]
@@ -343,6 +389,22 @@ contains
         return
 
     end function calc_itm
+
+
+    elemental function itm_c_lat(c,b,lat0,lat) result(c2D)
+        ! Determine the potential melt rate
+        ! t2m = [degrees Celcius] !!!
+        implicit none
+
+        real(prec), intent(IN) :: c, b, lat0, lat  
+        real(prec) :: c2D
+
+        ! Calculate the c parameter as a function of latitude 
+        c2D = c + b*(lat-lat0)
+
+        return
+
+    end function itm_c_lat
 
 end module smb_itm 
 

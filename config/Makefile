@@ -43,7 +43,7 @@ $(objdir)/ncio.o: $(libdir)/ncio.f90
 $(objdir)/interp1D.o: $(libdir)/insol/interp1D.f90
 	$(FC) $(DFLAGS) $(FFLAGS) -c -o $@ $<
 
-$(objdir)/interp_time.o: $(libdir)/coordinates/interp_time.f90 $(objdir)/interp1D.o
+$(objdir)/interp_time.o: $(libdir)/interp_time.f90 $(objdir)/interp1D.o
 	$(FC) $(DFLAGS) $(FFLAGS) -c -o $@ $<
 
 $(objdir)/insolation.o: $(libdir)/insol/insolation.f90 $(objdir)/interp_time.o
